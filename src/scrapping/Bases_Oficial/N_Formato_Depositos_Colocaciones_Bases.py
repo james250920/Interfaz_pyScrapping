@@ -1,5 +1,6 @@
 import os
-import sys
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from openpyxl import load_workbook
 
 def obtener_ultima_fila(ws, columna='A', fila_minima=5):
@@ -9,44 +10,62 @@ def obtener_ultima_fila(ws, columna='A', fila_minima=5):
             return fila
     return fila_minima
 
-def formato_deposiciones_colocaciones(ruta_principal):
-    ruta_destino = rf"{ruta_principal}\Base FONAFE WEB al mes.xlsm"
+
+# Convertida a función principal asíncrona
+async def formato_deposiciones_colocaciones(ruta_principal):
+    ruta_destino = os.path.join(ruta_principal, "Base FONAFE WEB al mes.xlsm")
 
     if not os.path.exists(ruta_destino):
         print("No existe archivo destino.")
         return
 
-    wb = None
-    try:
-        print("Abriendo archivo (esto puede demorar por las macros)...")
-        wb = load_workbook(ruta_destino, keep_vba=True)
-        ws = wb["Depósitos y Colocaciones"]
+    # Subfunción síncrona interna para aislar el proceso de formateo
+    def _formatear_sync():
+        wb = None
+        try:
+            print("Abriendo archivo destino en segundo plano (openpyxl)...")
+            wb = load_workbook(ruta_destino, keep_vba=True)
+            ws = wb["Depósitos y Colocaciones"]
 
-        ultima_fila = obtener_ultima_fila(ws, columna='A', fila_minima=5)
-        print(f"Última fila detectada: {ultima_fila}")
+            ultima_fila = obtener_ultima_fila(ws, columna='A', fila_minima=5)
+            print(f"Última fila detectada para dar formato: {ultima_fila}")
 
-        print("Aplicando formatos...")
-        for fila in range(5, ultima_fila + 1):
+            print("Aplicando formatos numéricos y de fecha...")
             
-            for col_letra in ['H', 'I', 'J']:
-                ws[f"{col_letra}{fila}"].number_format = '#,##0.00'
+            # Formatos cacheados en variables para optimizar velocidad del bucle
+            formato_numero = '#,##0.00'
+            formato_fecha = 'dd/mm/yyyy'
+            columnas_num = ['H', 'I', 'J']
+
+            for fila in range(5, ultima_fila + 1):
+                # Formato monetario / numérico
+                for col_letra in columnas_num:
+                    ws[f"{col_letra}{fila}"].number_format = formato_numero
+                
+                # Formato de fecha
+                ws[f"L{fila}"].number_format = formato_fecha
+
+            print("Guardando cambios en el archivo...")
+            print(">>> ATENCIÓN: El guardado puede demorar unos minutos. Por favor, espera... <<<")
+            wb.save(ruta_destino)
             
-            ws[f"L{fila}"].number_format = 'dd/mm/yyyy'
+            print(f"\n✓ ¡Formatos aplicados correctamente hasta la fila {ultima_fila}!")
 
-        print("Guardando archivo...")
-        print(">>> ATENCIÓN: El guardado puede demorar unos minutos. Por favor, espera... <<<")
-        wb.save(ruta_destino)
-        
-        print(f"\n¡Formatos aplicados correctamente hasta la fila {ultima_fila}!")
+        except PermissionError:
+            print("\n✗ ERROR: El archivo Excel destino está abierto. Ciérrelo antes de ejecutar.")
+        except Exception as e:
+            print(f"\n✗ ERROR Inesperado en el hilo de formateo: {e}")
+        finally:
+            print("Liberando recursos de la memoria...")
+            if wb:
+                wb.close()
 
-    except PermissionError:
-        print("\nERROR: El archivo Excel está abierto. Ciérrelo antes de ejecutar el programa.")
-    except Exception as e:
-        print(f"\nERROR Inesperado: {e}")
-    finally:
-        print("Cerrando archivo en memoria...")
-        if wb:
-            wb.close()
+    # --- COORDINACIÓN ASÍNCRONA ---
+    loop = asyncio.get_running_loop()
+    
+    # max_workers=1 para garantizar la exclusión mutua de escritura en la Base FONAFE
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        await loop.run_in_executor(executor, _formatear_sync)
         
-        print("Finalizando proceso...")
+    print("Proceso de diseño y formatos openpyxl finalizado.")
 

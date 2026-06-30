@@ -1,6 +1,8 @@
+import os
 import time
 import gc
-import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import shutil
 import pythoncom
@@ -13,6 +15,7 @@ import openpyxl
 RPC_E_CALL_REJECTED         = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
 
+# Se mantiene la lógica exacta de reintentos síncronos de COM
 def com_call(fn, reintentos=12, pausa=2.5):
     for intento in range(1, reintentos + 1):
         try:
@@ -56,40 +59,47 @@ def limpiar_cache_genpy():
             shutil.rmtree(patron, ignore_errors=True)
 
 
-def buscar_hoja(workbook, nombre):
-    for ws in workbook.Worksheets:
-        if ws.Name.strip() == nombre.strip():
-            return ws
-    return None
+# Convertida en la función principal asíncrona
+async def copiar_pegar_validacion_presupuesto(ruta_principal):
+    inicio = time.time()
 
-def copiar_pegar_validacion_presupuesto(ruta_principal):
-    RUTA_VALIDACION = rf"{ruta_principal}\VALIDACION GASTO CAPITAL\Validación_Gastos_Capital_Presupuesto.xlsx"
-    RUTA_DESTINO    = rf"{ruta_principal}\Base FONAFE WEB al mes.xlsm"
+    # Subfunción síncrona interna para aislar el proceso en el Pool de Hilos
+    def _ejecutar_proceso_sync():
+        RUTA_VALIDACION = os.path.join(ruta_principal, "VALIDACION GASTO CAPITAL", "Validación_Gastos_Capital_Presupuesto.xlsx")
+        RUTA_DESTINO    = os.path.join(ruta_principal, "Base FONAFE WEB al mes.xlsm")
 
-    OPERACIONES = [
-        ("Validacion_Comparativa", "A2:R5000",   "FBK-Alineado PRE", "A5:R5000"),
-        ("Validacion_Comparativa", "AA2:AL5000", "FBK-Alineado PRE", "S5:AD5000"),
-    ]
+        OPERACIONES = [
+            ("Validacion_Comparativa", "A2:R5000",   "FBK-Alineado PRE", "A5:R5000"),
+            ("Validacion_Comparativa", "AA2:AL5000", "FBK-Alineado PRE", "S5:AD5000"),
+        ]
 
-    wb_leer   = openpyxl.load_workbook(RUTA_VALIDACION, data_only=True)
-    hoja_leer = wb_leer.worksheets[0]
-    valor_ap1 = hoja_leer["AP1"].value or 0
-    valor_aq1 = hoja_leer["AQ1"].value or 0
-    wb_leer.close()
+        # 1. Lectura de validación rápida usando openpyxl
+        wb_leer   = openpyxl.load_workbook(RUTA_VALIDACION, data_only=True)
+        hoja_leer = wb_leer.worksheets[0]
+        valor_ap1 = hoja_leer["AP1"].value or 0
+        valor_aq1 = hoja_leer["AQ1"].value or 0
+        wb_leer.close()
 
-    if valor_ap1 + valor_aq1 != 0:
-        print(f"✗ No cumple. La suma de AP1+AQ1 = {valor_ap1 + valor_aq1}. Actualizar manualmente.")
-    else:
+        if valor_ap1 + valor_aq1 != 0:
+            print(f"✗ No cumple. La suma de AP1+AQ1 = {valor_ap1 + valor_aq1}. Actualizar manualmente.")
+            return None # Retorna None para indicar que el proceso COM no se inició
+
         print(f"✓ Validación cumplida: AP1({valor_ap1}) + AQ1({valor_aq1}) == 0\n")
 
-        inicio = time.time()
+        # 2. Inicialización del Bloque COM seguro
         excel = wb_FC = wb_destino = None
         pid_excel = None
 
+        def buscar_hoja(workbook, nombre):
+            for ws in workbook.Worksheets:
+                if ws.Name.strip() == nombre.strip():
+                    return ws
+            return None
+
         try:
+            # CRÍTICO: Registrar COM en el hilo secundario
             pythoncom.CoInitialize()
             limpiar_cache_genpy()
-
 
             excel     = win32.DispatchEx("Excel.Application")
             pid_excel = obtener_pid_excel(excel)
@@ -104,7 +114,7 @@ def copiar_pegar_validacion_presupuesto(ruta_principal):
             wb_FC      = excel.Workbooks.Open(RUTA_VALIDACION, UpdateLinks=False, ReadOnly=True)
             wb_destino = excel.Workbooks.Open(RUTA_DESTINO,    UpdateLinks=False, ReadOnly=False)
 
-            excel.Calculation         = -4135
+            excel.Calculation         = -4135 # xlCalculationManual
             excel.CalculateBeforeSave = False
 
             errores = 0
@@ -123,7 +133,7 @@ def copiar_pegar_validacion_presupuesto(ruta_principal):
                     print(f"  ✗ Hoja no encontrada: {', '.join(faltante)}")
                     errores += 1
 
-            excel.Calculation = -4105    
+            excel.Calculation = -4105 # xlCalculationAutomatic
             wb_destino.Save()
 
             if errores == 0:
@@ -132,26 +142,35 @@ def copiar_pegar_validacion_presupuesto(ruta_principal):
                 print(f"\n⚠ Guardado completado con {errores} operación(es) fallida(s).")
 
         except Exception as e:
-            print(f"\n✗ ERROR INESPERADO DURANTE EL PROCESO: {e}")
+            print(f"\n✗ ERROR INESPERADO DURANTE EL PROCESO COM: {e}")
 
         finally:
+            # Garantizar la liberación ordenada de recursos en el hilo
             for wb in (wb_FC, wb_destino):
                 try:
-                    if wb:
-                        wb.Close(False)
-                except Exception:
-                    pass
+                    if wb: wb.Close(False)
+                except Exception: pass
             try:
-                if excel:
-                    excel.Quit()
-            except Exception:
-                pass
+                if excel: excel.Quit()
+            except Exception: pass
 
             excel = wb_FC = wb_destino = None
             gc.collect()
             pythoncom.CoUninitialize()
 
-            time.sleep(1)
-            forzar_cierre_proceso(pid_excel)
+        return pid_excel
 
-            print(f"\nTiempo total de ejecución: {round(time.time() - inicio, 2)} segundos")
+    # --- COORDINACIÓN ASÍNCRONA ---
+    loop = asyncio.get_running_loop()
+    
+    # max_workers=1 para aislar la instancia de automatización de Excel de escritorio
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pid_generado = await loop.run_in_executor(executor, _ejecutar_proceso_sync)
+
+    # Si se pasó la validación y se creó el proceso, esperamos y cerramos asíncronamente
+    if pid_generado is not None:
+        await asyncio.sleep(1)
+        forzar_cierre_proceso(pid_generado)
+
+    print(f"\nTiempo total de ejecución: {round(time.time() - inicio, 2)} segundos")
+

@@ -1,7 +1,6 @@
 import os
 
 def cargar_datos_csv(ruta_archivo: str) -> list:
-    """Carga datos simulados imitando la lectura de archivos CSV o txt."""
     datos_por_archivo = {
         "listAnio.txt": [
             "2021", "2022", "2023", "2024", "2025", "2026", "2027", "2028", "2029", "2030"

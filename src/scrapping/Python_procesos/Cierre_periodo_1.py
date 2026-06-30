@@ -23,9 +23,9 @@ def com_call(fn, reintentos=12, pausa=1.0):
                 raise
 
 def cierre_periodo(ruta_principal):
-    ruta_destino = rf"{ruta_principal}\\Estado de Cierre al mes.xlsm"
-    ruta_ejec = rf"{ruta_principal}\\CIERRE\\Estado_de_Cierre_del_Periodo_Ejecucion.xlsx"
-    ruta_marco = rf"{ruta_principal}\\CIERRE\\Estado_de_Cierre_del_Periodo_Formulacion.xlsx"
+    ruta_destino = os.path.join(ruta_principal, "Estado de Cierre al mes.xlsm")
+    ruta_ejec = os.path.join(ruta_principal, "CIERRE", "Estado_de_Cierre_del_Periodo_Ejecucion.xlsx")
+    ruta_marco = os.path.join(ruta_principal, "CIERRE", "Estado_de_Cierre_del_Periodo_Formulacion.xlsx")
     
     inicio = time.time()
     excel = None

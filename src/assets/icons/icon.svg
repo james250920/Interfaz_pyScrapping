@@ -1,0 +1,13 @@
+<svg width="200" height="400" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Sombra -->
+  <path d="M120 0 L40 180 H95 L60 400 L160 190 H105 L120 0 Z"
+        fill="#000000" opacity="0.25" transform="translate(10,10)"/>
+
+  <!-- Rayo principal -->
+  <path d="M120 0 L40 180 H95 L60 400 L160 190 H105 L120 0 Z"
+        fill="#FFC400"/>
+
+  <!-- Brillo interno -->
+  <path d="M110 20 L60 175 H100 L75 360 L140 200 H105 L110 20 Z"
+        fill="#FFD84D" opacity="0.6"/>
+</svg>

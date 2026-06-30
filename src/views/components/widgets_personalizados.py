@@ -40,7 +40,7 @@ def crear_menubar(placeholder: str, datos: list, on_change=None) -> QComboBox:
     return combo
 
 
-def crear_imagen(ruta_base: str, src: str, width: int = 240, height: int = 180) -> QLabel:
+def crear_imagen(ruta_base: str, src: str, width: int = 300, height: int = 230) -> QLabel:
     label = QLabel()
     label.setFixedSize(width, height)
     label.setAlignment(Qt.AlignCenter)

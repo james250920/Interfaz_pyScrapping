@@ -21,7 +21,7 @@ def copiar_pegar_form_ejecu(ruta_archivo):
             "carpeta": f"{ruta_archivo}\\MARCO",
             "hoja_origen": 2,
             "columnas": "AB",
-            "excluir": ("gastos capital",),
+            "excluir": ("gastos_capital",),
             "mapa": {
                 "Presu_Ingresos_Egresos_Formulacion": "Sistema-Form. PRE",
                 "Flujo_de_Caja_Formulacion": "Sistema-Form. FC",
@@ -34,7 +34,7 @@ def copiar_pegar_form_ejecu(ruta_archivo):
             "carpeta": f"{ruta_archivo}\\EJECUCION",
             "hoja_origen": 1,
             "columnas": "U",
-            "excluir": ("gastos capital", "depositos colocaciones",),
+            "excluir": ("gastos_capital", "depositos_colocaciones",),
             "mapa": {
                 "Presu_Ingresos_Egresos_Ejecucion": "Sistema-Ejec. PRE",
                 "Flujo_de_Caja_Ejecucion": "Sistema-Ejec. FC",

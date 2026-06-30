@@ -2,11 +2,12 @@ import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit, 
                              QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox)
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 # Importamos tus componentes y modelos adaptados
-from src.views.components.widgets_personalizados import crear_menubar, crear_imagen
+from src.views.components.widgets_personalizados import crear_menubar
 from src.models.database import cargar_datos_csv
-from src.scrapping.ScrappingMain import scrapping_main
+from src.scrapping.scrapping_main import scrapping_main
 import datetime 
 
 
@@ -20,6 +21,10 @@ class MainWindow(QMainWindow):
         self.ruta_raiz = ruta_raiz # Guardamos la ruta del proyecto
         self.setWindowTitle("Sistema de extracción")
         self.setFixedSize(900, 540)
+        
+        # Configurar el icono de la ventana
+        ruta_icono = os.path.join(self.ruta_raiz, "src", "assets", "icons", "icon.svg")
+        self.setWindowIcon(QIcon(ruta_icono))
         
         # Carga de datos usando tu modelo
         self.datos_anos = cargar_datos_csv(os.path.join(self.ruta_raiz, "listAnio.txt"))
@@ -105,13 +110,18 @@ class MainWindow(QMainWindow):
         # ── PANEL DERECHO (Oscuro) ───────────────────────────────────────
         panel_derecho = QWidget()
         panel_derecho.setFixedWidth(340)
-        panel_derecho.setStyleSheet(f"background-color: {OSCURO};")
+        panel_derecho.setObjectName("panel_derecho")
+        path_fondo = os.path.join(self.ruta_raiz, "src", "assets", "images", "fondo.png").replace("\\", "/")
+        panel_derecho.setStyleSheet(f"""
+            QWidget#panel_derecho {{
+                border-image: url("{path_fondo}") 0 0 0 0 stretch stretch;
+                background-color: {OSCURO};
+            }}
+        """)
         layout_derecho = QVBoxLayout(panel_derecho)
         layout_derecho.setContentsMargins(24, 24, 24, 24)
 
-        # Inyección de tu componente Imagen reutilizable
-        imagen_libros = crear_imagen(self.ruta_raiz, "Img.png", width=240, height=180)
-        layout_derecho.addWidget(imagen_libros, 0, Qt.AlignCenter)
+
 
         # Ensamblado
         layout_principal.addWidget(panel_izquierdo)
