@@ -144,6 +144,9 @@ def scrapping_main(ruta_principal, anio, mes, fecha_cierre_sistema):
     print("Procesos de Excel eliminados. Iniciando proceso principal...")
     ejecutar_con_tiempo("copiarPlantillas", copiarPlantillas, ruta_principal)
     print("Python_procesos")
+    # Evita errores de políticas de bucles en arquitecturas específicas de Windows
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(Crear_Descargar_0.crear_descargar(ruta_principal, anio, mes))
     # asyncio.run(Actualizar_marcos.actualizar_marco(ruta_principal, max_workers=16))
     # asyncio.run(limpiarDatos.limpiar_datos(ruta_principal, mes))

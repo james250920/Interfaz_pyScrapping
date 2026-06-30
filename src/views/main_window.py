@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit, 
                              QPushButton, QHBoxLayout, QVBoxLayout, QMessageBox)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 
 # Importamos tus componentes y modelos adaptados
@@ -15,10 +15,32 @@ OSCURO = "#1a1a2e"
 GRIS_BG = "#f8f8f8"
 GRIS_BORDE = "#e2e2e2"
 
+
+class ScrappingWorker(QThread):
+    """Hilo de fondo para ejecutar el scrapping sin congelar la UI."""
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, directorio, anio, mes, fecha_cierre):
+        super().__init__()
+        self.directorio = directorio
+        self.anio = anio
+        self.mes = mes
+        self.fecha_cierre = fecha_cierre
+
+    def run(self):
+        try:
+            scrapping_main(self.directorio, self.anio, self.mes, self.fecha_cierre)
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class MainWindow(QMainWindow):
     def __init__(self, ruta_raiz):
         super().__init__()
         self.ruta_raiz = ruta_raiz # Guardamos la ruta del proyecto
+        self._worker = None  # Referencia al hilo de scrapping
         self.setWindowTitle("Sistema de extracción")
         self.setFixedSize(900, 540)
         
@@ -77,10 +99,10 @@ class MainWindow(QMainWindow):
         layout_combos.addWidget(self.combo_mes)
         layout_combos.setSpacing(14)
 
-        boton_iniciar = QPushButton("  Iniciar")
-        boton_iniciar.setFixedSize(160, 46)
-        boton_iniciar.setCursor(Qt.PointingHandCursor)
-        boton_iniciar.setStyleSheet("""
+        self.boton_iniciar = QPushButton("  Iniciar")
+        self.boton_iniciar.setFixedSize(160, 46)
+        self.boton_iniciar.setCursor(Qt.PointingHandCursor)
+        self.boton_iniciar.setStyleSheet("""
             QPushButton {
                 background-color: #0078d4;
                 color: white;
@@ -90,8 +112,9 @@ class MainWindow(QMainWindow):
                 font-family: 'Sora', 'Segoe UI';
             }
             QPushButton:hover { background-color: #006abc; }
+            QPushButton:disabled { background-color: #999999; }
         """)
-        boton_iniciar.clicked.connect(self.on_click_iniciar)
+        self.boton_iniciar.clicked.connect(self.on_click_iniciar)
 
         # Construcción del Layout Izquierdo
         layout_izquierdo.addWidget(etiqueta_config)
@@ -104,7 +127,7 @@ class MainWindow(QMainWindow):
         layout_izquierdo.addSpacing(6)
         layout_izquierdo.addLayout(layout_combos)
         layout_izquierdo.addSpacing(20)
-        layout_izquierdo.addWidget(boton_iniciar, 0, Qt.AlignLeft)
+        layout_izquierdo.addWidget(self.boton_iniciar, 0, Qt.AlignLeft)
         layout_izquierdo.addStretch()
 
         # ── PANEL DERECHO (Oscuro) ───────────────────────────────────────
@@ -145,7 +168,31 @@ class MainWindow(QMainWindow):
             msg.exec()
             return
         anio = self.combo_ano.currentText()
-        mes = self.combo_mes.currentText()
+        # Extraer solo el número del mes: "5, MAYO" → "5"
+        mes_texto = self.combo_mes.currentText()
+        mes = mes_texto.split(",")[0].strip()
         fecha_cierre_sistema = datetime.datetime.now().strftime("%d.%m.%Y")
-        print(f"Iniciando con directorio: {directorio}")
-        scrapping_main(directorio, anio, mes, fecha_cierre_sistema)
+
+        print(f"Iniciando con directorio: {directorio}, año: {anio}, mes: {mes}")
+
+        # Deshabilitar el botón para evitar doble ejecución
+        self.boton_iniciar.setEnabled(False)
+        self.boton_iniciar.setText("  Ejecutando...")
+
+        # Ejecutar scrapping en hilo de fondo para no congelar la UI
+        self._worker = ScrappingWorker(directorio, anio, mes, fecha_cierre_sistema)
+        self._worker.finished.connect(self._on_scrapping_finished)
+        self._worker.error.connect(self._on_scrapping_error)
+        self._worker.start()
+
+    def _on_scrapping_finished(self):
+        """Se ejecuta cuando el scrapping termina exitosamente."""
+        self.boton_iniciar.setEnabled(True)
+        self.boton_iniciar.setText("  Iniciar")
+        QMessageBox.information(self, "Completado", "El proceso de scrapping finalizó correctamente.")
+
+    def _on_scrapping_error(self, mensaje):
+        """Se ejecuta cuando el scrapping falla."""
+        self.boton_iniciar.setEnabled(True)
+        self.boton_iniciar.setText("  Iniciar")
+        QMessageBox.critical(self, "Error", f"Error durante el scrapping:\n{mensaje}")

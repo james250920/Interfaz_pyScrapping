@@ -1,8 +1,10 @@
 import os
+import sys
 import time
 import shutil
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import threading
 import uuid
 from pathlib import Path
 import traceback
@@ -14,6 +16,7 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.service import Service
+
 
 try:
     from webdriver_manager.chrome import ChromeDriverManager
@@ -68,7 +71,9 @@ async def crear_descargar(ruta_principal, anio, mes):
             options.add_argument("--disable-gpu")
             options.add_argument("--no-first-run")
             options.add_argument("--no-default-browser-check")
-            options.add_argument("--disable-extensions") # Ayuda a que sea más rápido en laptops lentas
+            options.add_argument("--disable-extensions")  # Ayuda a que sea más rápido en laptops lentas
+            options.add_argument("--disable-dev-shm-usage")  # Evita problemas de memoria compartida
+            options.add_argument("--disable-background-networking")
             
             if ChromeDriverManager:
                 service = Service(ChromeDriverManager().install())
@@ -77,6 +82,7 @@ async def crear_descargar(ruta_principal, anio, mes):
                 return webdriver.Chrome(options=options)
         except WebDriverException as e:
             print("✗ Error al crear el WebDriver de Chrome:", e)
+            print("  Verifica que Google Chrome esté instalado en esta computadora.")
             traceback.print_exc()
             logger.exception('Error creando WebDriver')
             raise
@@ -114,8 +120,12 @@ async def crear_descargar(ruta_principal, anio, mes):
 
     # ================= GRUPO EJECUCION =================
     def grupo_ejecucion(carpeta_descarga, task_name):
-        profile_dir = os.path.join(carpeta_descarga, 'profile_' + task_name)
+        # Perfil separado de la carpeta de descarga para evitar conflictos de lockfile
+        profile_dir = os.path.join(base_temp, 'profiles', 'profile_' + task_name)
+        if os.path.exists(profile_dir):
+            shutil.rmtree(profile_dir, ignore_errors=True)
         os.makedirs(profile_dir, exist_ok=True)
+        os.makedirs(carpeta_descarga, exist_ok=True)
         
         options = webdriver.ChromeOptions()
         options.add_experimental_option("prefs", {
@@ -209,8 +219,12 @@ async def crear_descargar(ruta_principal, anio, mes):
 
     # ================= GRUPO CIERRE =================
     def grupo_cierre(carpeta_descarga, task_name):
-        profile_dir = os.path.join(carpeta_descarga, 'profile_' + task_name)
+        # Perfil separado de la carpeta de descarga para evitar conflictos de lockfile
+        profile_dir = os.path.join(base_temp, 'profiles', 'profile_' + task_name)
+        if os.path.exists(profile_dir):
+            shutil.rmtree(profile_dir, ignore_errors=True)
         os.makedirs(profile_dir, exist_ok=True)
+        os.makedirs(carpeta_descarga, exist_ok=True)
         options = webdriver.ChromeOptions()
         options.add_experimental_option("prefs", {
             "download.default_directory": carpeta_descarga,
@@ -275,8 +289,12 @@ async def crear_descargar(ruta_principal, anio, mes):
 
     # ================= GRUPO FORMULACION =================
     def grupo_formulacion(carpeta_descarga, task_name):
-        profile_dir = os.path.join(carpeta_descarga, 'profile_' + task_name)
+        # Perfil separado de la carpeta de descarga para evitar conflictos de lockfile
+        profile_dir = os.path.join(base_temp, 'profiles', 'profile_' + task_name)
+        if os.path.exists(profile_dir):
+            shutil.rmtree(profile_dir, ignore_errors=True)
         os.makedirs(profile_dir, exist_ok=True)
+        os.makedirs(carpeta_descarga, exist_ok=True)
         options = webdriver.ChromeOptions()
         options.add_experimental_option("prefs", {
             "download.default_directory": carpeta_descarga,
@@ -347,15 +365,28 @@ async def crear_descargar(ruta_principal, anio, mes):
     # ================= MAIN ASYNC EXECUTION =================
     print("="*60)
     print("INICIANDO DESCARGA DE REPORTES FONAFE (ASYNC)")
+    print(f"Computadora: {os.environ.get('COMPUTERNAME', 'desconocido')}")
+    print(f"Usuario: {os.environ.get('USERNAME', 'desconocido')}")
     print("="*60)
 
     base_temp = os.path.join(os.path.expanduser("~"), "Downloads", "_temp_fonafe")
+    
+    # Limpiar carpetas temporales de ejecuciones anteriores
+    if os.path.exists(base_temp):
+        try:
+            shutil.rmtree(base_temp, ignore_errors=True)
+            logger.info('Carpetas temporales anteriores limpiadas')
+        except Exception:
+            logger.warning('No se pudieron limpiar todas las carpetas temporales')
+    os.makedirs(base_temp, exist_ok=True)
+    
     failures = {}
-    MAX_CONCURRENCY = int(os.environ.get('FONAFE_MAX_CONCURRENCY', '3'))
+    failures_lock = threading.Lock()  # Protege acceso concurrente al dict
+    MAX_CONCURRENCY = int(os.environ.get('FONAFE_MAX_CONCURRENCY', '2'))
     
     loop = asyncio.get_running_loop()
     
-    def run_with_retries(func, args, name, retries=1, backoff=3):
+    def run_with_retries(func, args, name, retries=1, backoff=5):
         tb = ""
         attempt = 0
         while attempt <= retries:
@@ -369,8 +400,11 @@ async def crear_descargar(ruta_principal, anio, mes):
                 logger.error(f'Error en {name} (intento {attempt+1}):\n{tb}')
                 attempt += 1
                 if attempt <= retries:
-                    time.sleep(backoff)
-        failures[name] = tb
+                    wait_time = backoff * attempt  # Backoff exponencial
+                    logger.info(f'Esperando {wait_time}s antes de reintentar {name}')
+                    time.sleep(wait_time)
+        with failures_lock:
+            failures[name] = tb
 
     thread_defs = [
         (grupo_ejecucion,   (os.path.join(base_temp, "g1"), "Grupo-Ejecucion"), "Grupo-Ejecución"),
@@ -378,7 +412,7 @@ async def crear_descargar(ruta_principal, anio, mes):
         (grupo_formulacion, (os.path.join(base_temp, "g3"), "Grupo-Formulacion"), "Grupo-Formulación"),
     ]
 
-    print("\nIniciando tareas en paralelo con Asyncio Executor...")
+    print(f"\nIniciando {len(thread_defs)} tareas en paralelo (max {MAX_CONCURRENCY} simultáneas)...")
     
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENCY) as executor:
         tasks = []
@@ -398,18 +432,30 @@ async def crear_descargar(ruta_principal, anio, mes):
     # Re-ejecución secuencial si fallan
     if failures:
         logger.warning('Se detectaron fallos. Intentando re-ejecución secuencial...')
+        print('\n⚠ Algunos grupos fallaron. Reintentando de forma secuencial...')
         for func, args, name in thread_defs:
             if name in failures:
                 try:
                     logger.info(f'Re-ejecutando secuencialmente {name}')
                     func(*args)
                     logger.info(f'{name} re-ejecutado correctamente (secuencial)')
-                    del failures[name]
+                    with failures_lock:
+                        del failures[name]
                 except Exception:
                     logger.error(f'Fallo al re-ejecutar {name} secuencialmente')
 
+    # Limpieza de carpetas temporales
+    try:
+        shutil.rmtree(base_temp, ignore_errors=True)
+        logger.info('Carpetas temporales limpiadas al finalizar')
+    except Exception:
+        logger.warning('No se pudieron limpiar las carpetas temporales al finalizar')
+
     if failures:
-        print('\nAlgunos grupos fallaron. Revisa los logs.')
+        print('\n✗ Algunos grupos fallaron. Revisa los logs en:')
+        print(f'  {os.path.join(ruta_principal, "logs")}')
+        for name, tb in failures.items():
+            print(f'  - {name}')
     else:
         print("\n" + "="*60)
         print("✓ PROCESO COMPLETADO EXITOSAMENTE")
