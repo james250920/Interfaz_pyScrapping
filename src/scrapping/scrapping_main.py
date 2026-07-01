@@ -167,10 +167,11 @@ async def _pipeline_async(ruta_principal, anio, mes, fecha_cierre_sistema, repor
     print("BASE finalizado")
 
     # ═══ Fase 3: EVA_Oficial ════════════════════════════════════════════════
+    eliminar_procesos_excel()
     reportar("EVA: Copiar y pegar...")
     await A_eva.copiar_pegar(ruta_principal, anio, mes)
-
     eliminar_procesos_excel()
+    
 
     reportar("EVA: Actualizando TD...")
     await BF_BaseActualizaTD.actualizar_td(ruta_principal)
