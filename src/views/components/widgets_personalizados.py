@@ -1,34 +1,82 @@
 import os
-from PySide6.QtWidgets import QComboBox, QLabel
+from PySide6.QtWidgets import QComboBox, QLabel, QProgressBar, QListView
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 
-from src.views.theme import AZUL, GRIS_BORDE, GRIS_BG
+from src.views.theme import (AZUL, GRIS_BORDE, GRIS_BG, FONT_FAMILY, 
+                             DORADO, DORADO_HOVER, OSCURO_CARD, OSCURO_2, GRIS_TEXTO, RADIUS_MD)
 
-def crear_menubar(placeholder: str, datos: list, on_change=None) -> QComboBox:
+def crear_menubar(placeholder: str, datos: list, on_change=None, default_val=None) -> QComboBox:
     combo = QComboBox()
-    
-    # En Qt, para tener un "Label/Placeholder" flotante o inicial, agregamos un elemento vacío 
-    # o usamos un truco de estilo. Lo más limpio para mantener tu lógica es añadir los datos:
     combo.addItems(datos)
     combo.setFixedWidth(148)
-    combo.setFixedHeight(40)
+    combo.setFixedHeight(44)
     
-    # Estilo CSS para replicar Flet
+    if default_val:
+        combo.setCurrentText(str(default_val))
+    
+    # ListView customizado para el dropdown
+    list_view = QListView()
+    list_view.setStyleSheet(f"""
+        QListView {{
+            background-color: {OSCURO_CARD};
+            color: white;
+            border: 1px solid {DORADO};
+            border-radius: {RADIUS_MD};
+            padding: 4px;
+            outline: 0;
+        }}
+        QListView::item {{
+            padding: 8px;
+            border-radius: 4px;
+        }}
+        QListView::item:hover {{
+            background-color: {DORADO_HOVER};
+            color: {OSCURO_CARD};
+        }}
+        QListView::item:selected {{
+            background-color: {DORADO};
+            color: {OSCURO_CARD};
+        }}
+    """)
+    combo.setView(list_view)
+    
+    # Estilo CSS premium
     combo.setStyleSheet(f"""
         QComboBox {{
             border: 1px solid {GRIS_BORDE};
-            border-radius: 10px;
-            background-color: white;
+            border-radius: {RADIUS_MD};
+            background-color: {GRIS_BG};
             padding-left: 14px;
             color: #333333;
             font-size: 13px;
+            font-family: {FONT_FAMILY};
         }}
         QComboBox::drop-down {{
-            border: 0px;
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 30px;
+            border-left-width: 0px;
+        }}
+        QComboBox::down-arrow {{
+            image: none; /* Podríamos usar un SVG aquí si hubiera */
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid {GRIS_TEXTO};
+            margin-right: 14px;
+        }}
+        QComboBox:hover {{
+            border: 1px solid {DORADO};
         }}
         QComboBox:focus {{
-            border: 1px solid {AZUL};
+            border: 1px solid {DORADO};
+            background-color: white;
+        }}
+        QComboBox QAbstractItemView {{
+            border: 1px solid {DORADO};
+            border-radius: {RADIUS_MD};
+            background-color: {OSCURO_CARD};
+            selection-background-color: {DORADO};
         }}
     """)
     
@@ -54,3 +102,21 @@ def crear_imagen(ruta_base: str, src: str, width: int = 300, height: int = 230) 
         label.setStyleSheet("color: white; font-size: 11px;")
         
     return label
+
+
+def crear_barra_progreso() -> QProgressBar:
+    barra = QProgressBar()
+    barra.setFixedHeight(12)
+    barra.setTextVisible(False)
+    barra.setStyleSheet(f"""
+        QProgressBar {{
+            border: none;
+            border-radius: 6px;
+            background-color: {GRIS_BG};
+        }}
+        QProgressBar::chunk {{
+            background-color: {DORADO};
+            border-radius: 6px;
+        }}
+    """)
+    return barra
