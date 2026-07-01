@@ -1,3 +1,14 @@
-__pycache__
-.venv
-__init__.py
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos temporales de Python (Caché)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Carpetas de configuración de editores (Opcional)
+.vscode/
+.idea/
