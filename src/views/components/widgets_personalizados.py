@@ -3,9 +3,7 @@ from PySide6.QtWidgets import QComboBox, QLabel
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 
-AZUL = "#115b82"
-GRIS_BORDE = "#e2e2e2"
-GRIS_BG = "#f8f8f8"
+from src.views.theme import AZUL, GRIS_BORDE, GRIS_BG
 
 def crear_menubar(placeholder: str, datos: list, on_change=None) -> QComboBox:
     combo = QComboBox()

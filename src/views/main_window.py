@@ -4,22 +4,19 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit,
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 
-# Importamos tus componentes y modelos adaptados
+# Importamos componentes, modelos y tema centralizado
 from src.views.components.widgets_personalizados import crear_menubar
-from src.models.database import cargar_datos_csv
+from src.views.theme import OSCURO, GRIS_BG, GRIS_BORDE, AZUL_PRIMARIO, AZUL_HOVER, GRIS_DESHABILITADO
+from src.models.database import obtener_datos_periodo
 from src.scrapping.scrapping_main import scrapping_main
-import datetime 
-
-
-OSCURO = "#1a1a2e"
-GRIS_BG = "#f8f8f8"
-GRIS_BORDE = "#e2e2e2"
+import datetime
 
 
 class ScrappingWorker(QThread):
     """Hilo de fondo para ejecutar el scrapping sin congelar la UI."""
     finished = Signal()
     error = Signal(str)
+    progress = Signal(str)
 
     def __init__(self, directorio, anio, mes, fecha_cierre):
         super().__init__()
@@ -30,7 +27,10 @@ class ScrappingWorker(QThread):
 
     def run(self):
         try:
-            scrapping_main(self.directorio, self.anio, self.mes, self.fecha_cierre)
+            scrapping_main(
+                self.directorio, self.anio, self.mes, self.fecha_cierre,
+                on_progreso=self.progress.emit,
+            )
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
@@ -48,9 +48,9 @@ class MainWindow(QMainWindow):
         ruta_icono = os.path.join(self.ruta_raiz, "src", "assets", "icons", "icon.svg")
         self.setWindowIcon(QIcon(ruta_icono))
         
-        # Carga de datos usando tu modelo
-        self.datos_anos = cargar_datos_csv(os.path.join(self.ruta_raiz, "listAnio.txt"))
-        self.datos_meses = cargar_datos_csv(os.path.join(self.ruta_raiz, "lisMes.txt"))
+        # Carga de datos usando el modelo
+        self.datos_anos = obtener_datos_periodo("anios")
+        self.datos_meses = obtener_datos_periodo("meses")
         
         self.init_ui()
 
@@ -102,17 +102,17 @@ class MainWindow(QMainWindow):
         self.boton_iniciar = QPushButton("  Iniciar")
         self.boton_iniciar.setFixedSize(160, 46)
         self.boton_iniciar.setCursor(Qt.PointingHandCursor)
-        self.boton_iniciar.setStyleSheet("""
-            QPushButton {
-                background-color: #0078d4;
+        self.boton_iniciar.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {AZUL_PRIMARIO};
                 color: white;
                 border-radius: 10px;
                 font-size: 14px;
                 font-weight: 600;
                 font-family: 'Sora', 'Segoe UI';
-            }
-            QPushButton:hover { background-color: #006abc; }
-            QPushButton:disabled { background-color: #999999; }
+            }}
+            QPushButton:hover {{ background-color: {AZUL_HOVER}; }}
+            QPushButton:disabled {{ background-color: {GRIS_DESHABILITADO}; }}
         """)
         self.boton_iniciar.clicked.connect(self.on_click_iniciar)
 
@@ -183,6 +183,7 @@ class MainWindow(QMainWindow):
         self._worker = ScrappingWorker(directorio, anio, mes, fecha_cierre_sistema)
         self._worker.finished.connect(self._on_scrapping_finished)
         self._worker.error.connect(self._on_scrapping_error)
+        self._worker.progress.connect(self._on_scrapping_progress)
         self._worker.start()
 
     def _on_scrapping_finished(self):
@@ -196,3 +197,7 @@ class MainWindow(QMainWindow):
         self.boton_iniciar.setEnabled(True)
         self.boton_iniciar.setText("  Iniciar")
         QMessageBox.critical(self, "Error", f"Error durante el scrapping:\n{mensaje}")
+
+    def _on_scrapping_progress(self, mensaje):
+        """Actualiza el texto del botón con el paso actual del proceso."""
+        self.boton_iniciar.setText(f"  {mensaje}")

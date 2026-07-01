@@ -6,17 +6,9 @@ import os
 import shutil
 import datetime
 import re
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import asyncio
 import sys
-import getpass
 
-ruta_principal = r"D:\TestUI"
-anio = "2026"
-mes = "5"
-
-fecha_cierre_sistema = datetime.datetime.now().strftime("%d.%m.%Y")      
 
 def eliminar_procesos_excel():
     try:
@@ -78,7 +70,8 @@ def formato_name_plantillas(ruta_principal, mes):
 
 
 def copiarPlantillas(ruta_principal):
-    carpeta_origen = r"Z:\Data_extraction\Plantillas"
+    # Ruta configurable: variable de entorno RUTA_PLANTILLAS o valor por defecto
+    carpeta_origen = os.environ.get("RUTA_PLANTILLAS", r"Z:\Data_extraction\Plantillas")
     carpeta_destino = ruta_principal
     # Asegúrate de que la carpeta de destino exista, si no, la crea
     os.makedirs(carpeta_destino, exist_ok=True)
@@ -95,23 +88,6 @@ def copiarPlantillas(ruta_principal):
     print("¡Proceso de copia finalizado!")
 
 
-def ejecutar_en_paralelo(trabajos):
-    """Ejecuta funciones independientes en paralelo y espera a que todas terminen."""
-    if not trabajos:
-        return
-
-    with ThreadPoolExecutor(max_workers=len(trabajos)) as executor:
-        futuros = {
-            executor.submit(funcion, *args, **kwargs): nombre
-            for nombre, funcion, args, kwargs in trabajos
-        }
-
-        for futuro in as_completed(futuros):
-            nombre = futuros[futuro]
-            futuro.result()
-            print(f"[{nombre}] finalizado en paralelo.")
-
-
 def ejecutar_con_tiempo(nombre, funcion, *args, **kwargs):
     inicio = time.perf_counter()
     print(f"[{nombre}] iniciando...")
@@ -121,94 +97,113 @@ def ejecutar_con_tiempo(nombre, funcion, *args, **kwargs):
     return resultado
 
 
+async def _pipeline_async(ruta_principal, anio, mes, fecha_cierre_sistema, reportar):
+    """Coordinador async principal — un solo event loop para todo el pipeline."""
+    loop = asyncio.get_running_loop()
 
-def limpiar_procesos_menos_vscode():
-    usuario = getpass.getuser()
-    print(f"Iniciando limpieza de procesos para el usuario: {usuario}...")
-    comando = (
-        f'taskkill /F '
-        f'/FI "USERNAME eq {usuario}" '
-        f'/FI "IMAGENAME ne code.exe" '
-        f'/FI "IMAGENAME ne python.exe" '
-        f'/FI "IMAGENAME ne cmd.exe"'
+    # ═══ Fase 1: Python_procesos ═══════════════════════════════════════════
+    reportar("Descargando datos...")
+    await Crear_Descargar_0.crear_descargar(ruta_principal, anio, mes)
+
+    reportar("Actualizando marcos...")
+    await Actualizar_marcos.actualizar_marco(ruta_principal, max_workers=16)
+
+    reportar("Limpiando datos...")
+    await limpiarDatos.limpiar_datos(ruta_principal, mes)
+    await asyncio.sleep(2)
+
+    # Cierre + Copia en paralelo (funciones síncronas via executor)
+    reportar("Cierre y copia en paralelo...")
+    await asyncio.gather(
+        loop.run_in_executor(None, Cierre_periodo_1.cierre_periodo, ruta_principal),
+        loop.run_in_executor(None, copiar_pegar_form_ejecu.copiar_pegar_form_ejecu, ruta_principal),
     )
-    resultado = os.system(comando)
-    if resultado == 0:
-        print("\nLimpieza completada con éxito. Solo quedaron VS Code y Python.")
-    else:
-        print("\nSe ejecutó el comando, pero algunos procesos protegidos no se pudieron cerrar.")
+    print("Proceso Python_procesos finalizado")
 
+    # ═══ Fase 2: Bases_Oficial ══════════════════════════════════════════════
+    reportar("Actualizando datos iniciales...")
+    await A.actualizar_datos_iniciales(ruta_principal, anio, mes, fecha_cierre_sistema)
 
-def scrapping_main(ruta_principal, anio, mes, fecha_cierre_sistema):
+    reportar("Copiando cierre y validación...")
+    await B.copiar_pegar_cierre_y_validacion(ruta_principal)
+
+    reportar("Limpiando hojas Excel...")
+    await C.limpiar_hojas_excel(ruta_principal)
+
+    reportar("Creando archivos validación GK...")
+    await loop.run_in_executor(None, D.crear_archivos_validacion, ruta_principal)
+
+    reportar("Actualizando gastos de capital...")
+    await E.actualizar_gastos_capital(ruta_principal, max_workers=16)
+
+    # F y G son síncronas e independientes → paralelo via executor
+    reportar("Consolidando GK (flujo caja + presupuesto)...")
+    await asyncio.gather(
+        loop.run_in_executor(None, F.consolidar_gk_flujo_caja, ruta_principal),
+        loop.run_in_executor(None, G.consolidar_gk_presupuesto, ruta_principal),
+    )
+
+    reportar("Validación Flujo de Caja...")
+    await H.copiar_pegar_validacion_Flujo_Caja(ruta_principal)
+
+    reportar("Validación Presupuesto...")
+    await I.copiar_pegar_validacion_presupuesto(ruta_principal)
+
+    reportar("Desplegando fórmulas...")
+    await J.desplegar_formulas(ruta_principal)
+
+    reportar("Cambiando formato...")
+    await loop.run_in_executor(None, K.cambiar_formato, ruta_principal)
+
+    reportar("Limpiando depósitos/colocaciones...")
+    await L.limpiar_hojas_excel(ruta_principal)
+
+    reportar("Copiando depósitos/colocaciones...")
+    await M.copiar_pegar_deposiciones_colocaciones(ruta_principal)
+
+    reportar("Formato depósitos/colocaciones...")
+    await N.formato_deposiciones_colocaciones(ruta_principal)
+
+    print("BASE finalizado")
+
+    # ═══ Fase 3: EVA_Oficial ════════════════════════════════════════════════
+    reportar("EVA: Copiar y pegar...")
+    await A_eva.copiar_pegar(ruta_principal, anio, mes)
+
     eliminar_procesos_excel()
-    print("Procesos de Excel eliminados. Iniciando proceso principal...")
+
+    reportar("EVA: Actualizando TD...")
+    await BF_BaseActualizaTD.actualizar_td(ruta_principal)
+
+
+def scrapping_main(ruta_principal, anio, mes, fecha_cierre_sistema, on_progreso=None):
+    """Orquestador principal del proceso de scrapping.
+
+    Args:
+        ruta_principal: Directorio de trabajo donde se procesan los archivos.
+        anio: Año del período a procesar (ej: "2026").
+        mes: Número de mes del período (ej: "5").
+        fecha_cierre_sistema: Fecha de cierre formateada (ej: "01.07.2026").
+        on_progreso: Callback opcional que recibe un str con el mensaje de avance.
+    """
+    def reportar(msg):
+        print(f"[Progreso] {msg}")
+        if on_progreso:
+            on_progreso(msg)
+
+    reportar("Eliminando procesos de Excel...")
+    eliminar_procesos_excel()
+
+    reportar("Copiando plantillas...")
     ejecutar_con_tiempo("copiarPlantillas", copiarPlantillas, ruta_principal)
-    print("Python_procesos")
-    # Evita errores de políticas de bucles en arquitecturas específicas de Windows
+
+    # Un solo event loop para todas las operaciones asíncronas
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    asyncio.run(Crear_Descargar_0.crear_descargar(ruta_principal, anio, mes))
-    # asyncio.run(Actualizar_marcos.actualizar_marco(ruta_principal, max_workers=16))
-    # asyncio.run(limpiarDatos.limpiar_datos(ruta_principal, mes))
-    # time.sleep(2)
 
-    # def ejecutar_cierre():
-    #     ejecutar_con_tiempo("Cierre_periodo_1.cierre_periodo", Cierre_periodo_1.cierre_periodo, ruta_principal)
+    asyncio.run(_pipeline_async(ruta_principal, anio, mes, fecha_cierre_sistema, reportar))
 
-    # def ejecutar_copia():
-    #     ejecutar_con_tiempo("copiar_pegar_form_ejecu.copiar_pegar_form_ejecu", copiar_pegar_form_ejecu.copiar_pegar_form_ejecu, ruta_principal)
-
-    # hilo_cierre = threading.Thread(target=ejecutar_cierre)
-    # hilo_copia = threading.Thread(target=ejecutar_copia)
-
-    # hilo_cierre.start()
-    # hilo_copia.start()
-
-    # hilo_cierre.join()
-    # hilo_copia.join()
-
-    # print("Proceso Python_procesos finalizado")
-
-    # print("Bases_Oficial")
-
-    # #Evita errores de políticas de bucles en arquitecturas específicas de Windows
-    # if sys.platform == 'win32':
-    #     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    # asyncio.run(A.actualizar_datos_iniciales( ruta_principal, anio, mes, fecha_cierre_sistema))
-
-    # asyncio.run(B.copiar_pegar_cierre_y_validacion( ruta_principal))
-
-    # print("empezamos a limpiar las hojas de excel")
-    # asyncio.run(C.limpiar_hojas_excel(ruta_principal))
-    # ejecutar_con_tiempo("D.crear_archivos_validacion", D.crear_archivos_validacion, ruta_principal)
-
-    # asyncio.run(E.actualizar_gastos_capital(ruta_principal, max_workers=16))
-    # ejecutar_con_tiempo("F/G consolidar_gk", ejecutar_en_paralelo, [
-    #     ("F.consolidar_gk_flujo_caja", F.consolidar_gk_flujo_caja, (ruta_principal,), {}),
-    #     ("G.consolidar_gk_presupuesto", G.consolidar_gk_presupuesto, (ruta_principal,), {}),
-    # ])
-
-    # asyncio.run(H.copiar_pegar_validacion_Flujo_Caja(ruta_principal))
-
-    # asyncio.run(I.copiar_pegar_validacion_presupuesto(ruta_principal))
-    # asyncio.run(J.desplegar_formulas(ruta_principal))
-
-    # ejecutar_con_tiempo("K.cambiar_formato", K.cambiar_formato, ruta_principal)
-
-    # asyncio.run(L.limpiar_hojas_excel(ruta_principal))
-
-    # asyncio.run(M.copiar_pegar_deposiciones_colocaciones(ruta_principal))
-
-    # asyncio.run(N.formato_deposiciones_colocaciones(ruta_principal))
-
-    # print("BASE finalizado")
-
-    # print("EVA_Oficial")
-
-    # asyncio.run(A_eva.copiar_pegar(ruta_principal, anio, mes))
-    # eliminar_procesos_excel()
-    # asyncio.run(BF_BaseActualizaTD.actualizar_td(ruta_principal))
-    # print("Proceso finalizado")
-    # print("Renombrando archivos y carpetas...")
-    # formato_name_plantillas(ruta_principal, mes)
-    # eliminar_procesos_excel()
+    reportar("Renombrando archivos y carpetas...")
+    formato_name_plantillas(ruta_principal, mes)
+    eliminar_procesos_excel()
+    print("Proceso finalizado")
