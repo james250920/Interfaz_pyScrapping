@@ -1,5 +1,12 @@
 import os
-from PySide6.QtWidgets import QComboBox, QLabel, QProgressBar, QListView
+from PySide6.QtWidgets import (
+    QComboBox,
+    QLabel,
+    QProgressBar,
+    QListView,
+    QSizePolicy,
+    QAbstractItemView,
+)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 
@@ -8,81 +15,112 @@ from src.views.theme import (AZUL, GRIS_BORDE, GRIS_BG, FONT_FAMILY,
 
 def crear_menubar(placeholder: str, datos: list, on_change=None, default_val=None) -> QComboBox:
     combo = QComboBox()
+
+    # Datos
     combo.addItems(datos)
-    combo.setFixedWidth(148)
-    combo.setFixedHeight(44)
-    
-    if default_val:
+
+    # Tamaño
+    combo.setMinimumHeight(44)
+    combo.setMaxVisibleItems(6)
+
+    # Evita problemas de tamaño del popup
+    combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    # Mucho más estable que AdjustToContents
+    combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+
+    # Vista personalizada
+    view = QListView()
+
+    view.setUniformItemSizes(True)
+    view.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+    view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+    combo.setView(view)
+
+    # Valor por defecto
+    if default_val is not None:
         combo.setCurrentText(str(default_val))
-    
-    # ListView customizado para el dropdown
-    list_view = QListView()
-    list_view.setStyleSheet(f"""
-        QListView {{
-            background-color: {OSCURO_CARD};
-            color: white;
-            border: 1px solid {DORADO};
-            border-radius: {RADIUS_MD};
-            padding: 4px;
-            outline: 0;
-        }}
-        QListView::item {{
-            padding: 8px;
-            border-radius: 4px;
-        }}
-        QListView::item:hover {{
-            background-color: {DORADO_HOVER};
-            color: {OSCURO_CARD};
-        }}
-        QListView::item:selected {{
-            background-color: {DORADO};
-            color: {OSCURO_CARD};
-        }}
-    """)
-    combo.setView(list_view)
-    
-    # Estilo CSS premium
-    combo.setStyleSheet(f"""
-        QComboBox {{
-            border: 1px solid {GRIS_BORDE};
-            border-radius: {RADIUS_MD};
-            background-color: {GRIS_BG};
-            padding-left: 14px;
-            color: #333333;
-            font-size: 13px;
-            font-family: {FONT_FAMILY};
-        }}
-        QComboBox::drop-down {{
-            subcontrol-origin: padding;
-            subcontrol-position: top right;
-            width: 30px;
-            border-left-width: 0px;
-        }}
-        QComboBox::down-arrow {{
-            image: none; /* Podríamos usar un SVG aquí si hubiera */
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 5px solid {GRIS_TEXTO};
-            margin-right: 14px;
-        }}
-        QComboBox:hover {{
-            border: 1px solid {DORADO};
-        }}
-        QComboBox:focus {{
-            border: 1px solid {DORADO};
-            background-color: white;
-        }}
-        QComboBox QAbstractItemView {{
-            border: 1px solid {DORADO};
-            border-radius: {RADIUS_MD};
-            background-color: {OSCURO_CARD};
-            selection-background-color: {DORADO};
-        }}
-    """)
-    
+
+    # Evento
     if on_change:
         combo.currentTextChanged.connect(on_change)
-        
+
+    # Tu stylesheet
+    combo.setStyleSheet(f"""
+QComboBox {{
+    background-color: #FFFFFF;
+    border: 1px solid {GRIS_BORDE};
+    border-radius: 10px;
+    padding: 8px 38px 8px 12px;
+    color: #2F2F2F;
+    font-size: 13px;
+    font-family: {FONT_FAMILY};
+}}
+
+QComboBox:hover {{
+    border: 1px solid {DORADO};
+    background: #FCFCFC;
+}}
+
+QComboBox:focus {{
+    border: 2px solid {DORADO};
+    background: white;
+}}
+
+QComboBox:disabled {{
+    background: #F4F4F4;
+    color: #A0A0A0;
+}}
+
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 32px;
+    border: none;
+    background: transparent;
+}}
+
+QComboBox::down-arrow {{
+    image: none;
+    width: 0px;
+    height: 0px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #666666;
+    margin-right: 10px;
+}}
+
+QComboBox QAbstractItemView {{
+    background: {OSCURO_CARD};
+    color: white;
+    border: 1px solid {DORADO};
+    border-radius: 8px;
+    outline: none;
+    selection-background-color: {DORADO};
+    selection-color: {OSCURO_CARD};
+}}
+
+QComboBox QAbstractItemView::item {{
+    height: 34px;
+    padding-left: 12px;
+    padding-right: 12px;
+    border: none;
+}}
+
+QComboBox QAbstractItemView::item:hover {{
+    background: {DORADO_HOVER};
+    color: {OSCURO_CARD};
+}}
+
+QComboBox QAbstractItemView::item:selected {{
+    background: {DORADO};
+    color: {OSCURO_CARD};
+    font-weight: bold;
+}}
+""")
+
     return combo
 
 

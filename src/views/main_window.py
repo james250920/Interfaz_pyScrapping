@@ -1,9 +1,9 @@
 import os
 import datetime
 from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit, 
-                             QPushButton, QHBoxLayout, QVBoxLayout, QFileDialog)
+                             QPushButton, QHBoxLayout, QVBoxLayout, QFileDialog, QGraphicsDropShadowEffect)
 from PySide6.QtCore import Qt, QThread, Signal, QPoint
-from PySide6.QtGui import QIcon, QMouseEvent, QPixmap
+from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor
 
 # Importamos componentes, modelos y tema centralizado
 from src.views.components.widgets_personalizados import crear_menubar, crear_imagen, crear_barra_progreso
@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         title_bar.mousePressEvent = self.title_bar_mousePressEvent
         title_bar.mouseMoveEvent = self.title_bar_mouseMoveEvent
         
-        app_title = QLabel("ZEUS EXCELS")
+        app_title = QLabel("SISTEMA DE DESCARGAS")
         app_title.setStyleSheet(f"color: {DORADO}; font-weight: bold; font-family: {FONT_FAMILY}; letter-spacing: 1px;")
         
         btn_close = QPushButton("✕")
@@ -229,6 +229,14 @@ class MainWindow(QMainWindow):
         
         layout_card_dir.addWidget(etiqueta_dir)
         layout_card_dir.addLayout(layout_input_dir)
+        
+        # Sombra card_dir
+        shadow_dir = QGraphicsDropShadowEffect(self)
+        shadow_dir.setBlurRadius(15)
+        shadow_dir.setXOffset(0)
+        shadow_dir.setYOffset(4)
+        shadow_dir.setColor(QColor(0, 0, 0, 15))
+        card_dir.setGraphicsEffect(shadow_dir)
 
         # Card: Período
         card_periodo = QWidget()
@@ -253,13 +261,22 @@ class MainWindow(QMainWindow):
         layout_combos = QHBoxLayout()
         layout_combos.addWidget(self.combo_ano)
         layout_combos.addWidget(self.combo_mes)
-        layout_combos.setSpacing(14)
+        layout_combos.setSpacing(19)
+        layout_combos.addStretch() # Empuja los combos a la izquierda
         
         layout_card_per.addWidget(etiqueta_periodo)
         layout_card_per.addLayout(layout_combos)
+        
+        # Sombra card_periodo
+        shadow_per = QGraphicsDropShadowEffect(self)
+        shadow_per.setBlurRadius(15)
+        shadow_per.setXOffset(0)
+        shadow_per.setYOffset(4)
+        shadow_per.setColor(QColor(0, 0, 0, 15))
+        card_periodo.setGraphicsEffect(shadow_per)
 
         # Botón Iniciar
-        self.boton_iniciar = QPushButton("⚡ INICIAR EXTRACCIÓN")
+        self.boton_iniciar = QPushButton("INICIAR EXTRACCIÓN")
         self.boton_iniciar.setFixedHeight(50)
         self.boton_iniciar.setCursor(Qt.PointingHandCursor)
         self.boton_iniciar.setStyleSheet(f"""
@@ -281,6 +298,14 @@ class MainWindow(QMainWindow):
             }}
         """)
         self.boton_iniciar.clicked.connect(self.on_click_iniciar)
+        
+        # Sombra dorada para el botón
+        shadow_btn = QGraphicsDropShadowEffect(self)
+        shadow_btn.setBlurRadius(20)
+        shadow_btn.setXOffset(0)
+        shadow_btn.setYOffset(6)
+        shadow_btn.setColor(QColor(255, 196, 0, 60))
+        self.boton_iniciar.setGraphicsEffect(shadow_btn)
 
         # Progreso
         self.progreso_widget = QWidget()
@@ -312,7 +337,7 @@ class MainWindow(QMainWindow):
         panel_derecho.setObjectName("panel_derecho")
         
         path_fondo = os.path.join(self.ruta_raiz, "src", "assets", "images", "fondo.png").replace("\\", "/")
-        path_logo = os.path.join(self.ruta_raiz, "src", "assets", "images", "Img.png")
+        
         
         panel_derecho.setStyleSheet(f"""
             QWidget#panel_derecho {{
@@ -321,31 +346,11 @@ class MainWindow(QMainWindow):
             }}
         """)
         
-        # Overlay oscuro
-        overlay = QWidget(panel_derecho)
-        overlay.setStyleSheet(f"background-color: rgba(15, 15, 26, 0.7); border-bottom-right-radius: {RADIUS_MD};")
-        overlay.resize(450, 600)
-        
-        layout_derecho = QVBoxLayout(overlay)
+        # Layout directamente en el panel derecho (sin overlay)
+        layout_derecho = QVBoxLayout(panel_derecho)
         layout_derecho.setContentsMargins(40, 40, 40, 40)
         
         layout_derecho.addStretch()
-        
-        # Logo Central
-        if os.path.exists(path_logo):
-            logo_label = QLabel()
-            pixmap = QPixmap(path_logo).scaled(320, 320, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            logo_label.setPixmap(pixmap)
-            logo_label.setAlignment(Qt.AlignCenter)
-            layout_derecho.addWidget(logo_label)
-        
-        layout_derecho.addStretch()
-        
-        # Footer / Tagline
-        lbl_tagline = QLabel("Optimizado para alto rendimiento")
-        lbl_tagline.setAlignment(Qt.AlignCenter)
-        lbl_tagline.setStyleSheet(f"color: rgba(255,255,255,0.5); font-size: 11px; font-family: {FONT_FAMILY};")
-        layout_derecho.addWidget(lbl_tagline)
 
         # Ensamblado Final
         layout_principal.addWidget(panel_izquierdo)
