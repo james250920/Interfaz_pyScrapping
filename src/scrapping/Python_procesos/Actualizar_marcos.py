@@ -50,8 +50,10 @@ async def actualizar_marco(ruta: str, max_workers: int = 8):
                 for row in df_filtrado.itertuples(index=False, name=None):
                     ws_copia.append(list(row))
 
-                wb.save(ruta_archivo)
+                temp_file = ruta_archivo + ".tmp"
+                wb.save(temp_file)
                 wb.close() # Forzamos el cierre explícito del puntero del archivo
+                os.replace(temp_file, ruta_archivo)
                 
                 resultado.update({"ok": True, "hoja": nombre_copia, "eliminadas": eliminadas, "error": ""})
                 break # Éxito, salimos del bucle de reintentos

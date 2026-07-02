@@ -207,6 +207,9 @@ def copiar_pegar_form_ejecu(ruta_archivo):
             except Exception as e:
                 print(f"✗ Error cerrando Excel: {e}")
         
+        wb_destino = None
+        excel = None
+        
         try:
             gc.collect()
             time.sleep(0.5)

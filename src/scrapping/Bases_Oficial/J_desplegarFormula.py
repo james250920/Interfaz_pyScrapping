@@ -74,8 +74,10 @@ async def desplegar_formulas(ruta_principal):
             print(f"  ✓ Fórmulas agregadas en PRE hasta la fila {filas_pre}.")
             
             print("Guardando cambios en el disco duro...")
-            workbook.save(ruta_excel)
+            temp_file = ruta_excel + ".tmp"
+            workbook.save(temp_file)
             workbook.close()  # Cierre explícito para liberar el flujo de memoria
+            os.replace(temp_file, ruta_excel)
             print("✓ Proceso completo exitosamente.")
 
         except PermissionError:

@@ -47,7 +47,11 @@ async def formato_deposiciones_colocaciones(ruta_principal):
 
             print("Guardando cambios en el archivo...")
             print(">>> ATENCIÓN: El guardado puede demorar unos minutos. Por favor, espera... <<<")
-            wb.save(ruta_destino)
+            temp_file = ruta_destino + ".tmp"
+            wb.save(temp_file)
+            wb.close()
+            wb = None
+            os.replace(temp_file, ruta_destino)
             
             print(f"\n✓ ¡Formatos aplicados correctamente hasta la fila {ultima_fila}!")
 

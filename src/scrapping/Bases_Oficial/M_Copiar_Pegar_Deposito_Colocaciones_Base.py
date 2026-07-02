@@ -67,7 +67,11 @@ async def copiar_pegar_deposiciones_colocaciones(ruta_principal):
             print("¡Datos pegados! Iniciando proceso de GUARDADO...")
             print(">>> ATENCIÓN: El guardado puede demorar varios minutos. Por favor, espera... <<<")
             
-            wb_destino.save(ruta_destino)
+            temp_file = ruta_destino + ".tmp"
+            wb_destino.save(temp_file)
+            wb_destino.close()
+            wb_destino = None
+            os.replace(temp_file, ruta_destino)
             print(f"\n✓ ¡Proceso completado con éxito! Filas copiadas: {ultima_fila - 1}")
 
         except PermissionError:

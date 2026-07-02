@@ -1,94 +1,98 @@
 import os
 import time
 import gc
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import tempfile
 import shutil
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import pythoncom
 import pywintypes
 import win32com.client as win32
 import win32process
-import win32api
 import openpyxl
+
 
 RPC_E_CALL_REJECTED         = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
 
-# Se mantiene la lógica exacta de reintentos síncronos de COM
+
+# -----------------------------
+# COM SAFE CALL
+# -----------------------------
 def com_call(fn, reintentos=12, pausa=2.5):
     for intento in range(1, reintentos + 1):
         try:
             return fn()
         except pywintypes.com_error as e:
             if e.hresult in (RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER):
-                print(f"    ⏳ Excel ocupado, reintento {intento}/{reintentos} en {pausa}s...")
+                print(f"⏳ Excel ocupado, reintento {intento}/{reintentos}...")
                 time.sleep(pausa)
             else:
                 raise
-    raise RuntimeError(f"Excel rechazó la llamada tras {reintentos} reintentos.")
+    raise RuntimeError("Excel rechazó la operación tras reintentos.")
 
 
-def obtener_pid_excel(excel_app):
-    try:
-        hwnd = excel_app.Hwnd
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        return pid
-    except Exception:
-        return None
-
-
-def forzar_cierre_proceso(pid):
-    if pid is None:
-        return
-    try:
-        handle = win32api.OpenProcess(1, False, pid)
-        win32api.TerminateProcess(handle, 0)
-        win32api.CloseHandle(handle)
-        print(f"  🔪 Proceso Excel (PID {pid}) terminado forzosamente.")
-    except Exception:
-        pass
-
-
+# -----------------------------
+# LIMPIEZA TEMPORAL
+# -----------------------------
 def limpiar_cache_genpy():
-    for patron in [
+    rutas = [
         os.path.join(tempfile.gettempdir(), "gen_py"),
         os.path.join(os.environ.get("LOCALAPPDATA", ""), "Temp", "gen_py"),
-    ]:
-        if os.path.exists(patron):
-            shutil.rmtree(patron, ignore_errors=True)
+    ]
+
+    for r in rutas:
+        if os.path.exists(r):
+            shutil.rmtree(r, ignore_errors=True)
 
 
-# Convertida en la función principal asíncrona
+# -----------------------------
+# FUNCION PRINCIPAL (ASYNC + THREADPOOL)
+# -----------------------------
 async def copiar_pegar_validacion_Flujo_Caja(ruta_principal):
-    inicio = time.time()
 
-    # Subfunción síncrona interna aislada para el Executor
-    def _ejecutar_flujo_sync():
-        RUTA_VALIDACION = os.path.join(ruta_principal, "VALIDACION GASTO CAPITAL", "Validacion_Gastos_Capital_Flujo_Caja.xlsx")
-        RUTA_DESTINO    = os.path.join(ruta_principal, "Base FONAFE WEB al mes.xlsm")
+    RUTA_VALIDACION = os.path.join(
+        ruta_principal,
+        "VALIDACION GASTO CAPITAL",
+        "Validacion_Gastos_Capital_Flujo_Caja.xlsx"
+    )
 
-        OPERACIONES = [
-            ("Validacion_Comparativa", "A2:Q5000",  "FBK-Alineado FLU", "A5:Q5000"),
-            ("Validacion_Comparativa", "X2:AI5000", "FBK-Alineado FLU", "R5:AC5000"),
-        ]
+    RUTA_DESTINO = os.path.join(
+        ruta_principal,
+        "Base FONAFE WEB al mes.xlsm"
+    )
 
-        # 1. Lectura rápida de validación con openpyxl
-        wb_leer   = openpyxl.load_workbook(RUTA_VALIDACION, data_only=True)
-        hoja_leer = wb_leer.worksheets[0]
-        valor_ap1 = hoja_leer["AP1"].value or 0
-        valor_aq1 = hoja_leer["AQ1"].value or 0
-        wb_leer.close()
+    OPERACIONES = [
+        ("Validacion_Comparativa", "A2:Q5000",  "FBK-Alineado FLU", "A5:Q5000"),
+        ("Validacion_Comparativa", "X2:AI5000", "FBK-Alineado FLU", "R5:AC5000"),
+    ]
 
-        if valor_ap1 + valor_aq1 != 0:
-            print(f"✗ No cumple. La suma de AP1+AQ1 = {valor_ap1 + valor_aq1}. Actualizar manualmente.")
-            return None # Retorna None indicando que no se inició el proceso COM
+    # -----------------------------
+    # VALIDACIÓN PREVIA (openpyxl — fuera del hilo COM)
+    # -----------------------------
+    wb_check = openpyxl.load_workbook(RUTA_VALIDACION, data_only=True)
+    ws_check = wb_check.worksheets[0]
 
-        print(f"✓ Validación cumplida: AP1({valor_ap1}) + AQ1({valor_aq1}) = 0\n")
+    ap1 = ws_check["AP1"].value or 0
+    aq1 = ws_check["AQ1"].value or 0
+    wb_check.close()
+    wb_check = None
 
-        # 2. Inicialización del Bloque COM si pasa la validación
-        excel = wb_presupuesto = wb_destino = None
-        pid_excel = None
+    if ap1 + aq1 != 0:
+        print(f"✗ Validación fallida: AP1+AQ1 = {ap1 + aq1}")
+        return
+
+    print(f"✓ Validación OK: AP1({ap1}) + AQ1({aq1}) = 0")
+
+    # -----------------------------
+    # SUBFUNCION SINCRONA (aislada en hilo propio)
+    # -----------------------------
+    def _ejecutar_com_sync():
+        inicio = time.time()
+
+        excel = None
+        wb_validacion = None
+        wb_destino = None
 
         def buscar_hoja(workbook, nombre):
             for ws in workbook.Worksheets:
@@ -97,78 +101,96 @@ async def copiar_pegar_validacion_Flujo_Caja(ruta_principal):
             return None
 
         try:
-            # CRÍTICO: Registrar COM en el contexto de este hilo secundario
+            # CRÍTICO: Inicializar COM en este hilo
             pythoncom.CoInitialize()
             limpiar_cache_genpy()
 
-            excel     = win32.DispatchEx("Excel.Application")
-            pid_excel = obtener_pid_excel(excel)
-            print(f"Proceso Excel iniciado (PID: {pid_excel})\n")
+            excel = win32.DispatchEx("Excel.Application")
 
-            excel.Visible         = False
-            excel.DisplayAlerts   = False
-            excel.ScreenUpdating  = False
-            excel.EnableEvents    = False
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            excel.ScreenUpdating = False
+            excel.EnableEvents = False
 
+            print("Excel iniciado (Flujo Caja)")
             print("Abriendo archivos...")
-            wb_presupuesto = excel.Workbooks.Open(RUTA_VALIDACION, UpdateLinks=False, ReadOnly=True)
-            wb_destino     = excel.Workbooks.Open(RUTA_DESTINO,    UpdateLinks=False, ReadOnly=False)
 
-            excel.Calculation         = -4135 # Manual
-            excel.CalculateBeforeSave = False
+            wb_validacion = excel.Workbooks.Open(
+                RUTA_VALIDACION,
+                UpdateLinks=False,
+                ReadOnly=True
+            )
+
+            wb_destino = excel.Workbooks.Open(
+                RUTA_DESTINO,
+                UpdateLinks=False,
+                ReadOnly=False
+            )
+
+            excel.Calculation = -4135  # manual
 
             errores = 0
-            for hoja_orig, rango_orig, hoja_dest, rango_dest in OPERACIONES:
-                ws_origen  = buscar_hoja(wb_presupuesto, hoja_orig)
-                ws_destino = buscar_hoja(wb_destino,     hoja_dest)
 
-                if ws_origen and ws_destino:
-                    valor = com_call(lambda o=ws_origen, r=rango_orig: o.Range(r).Value)
-                    com_call(lambda d=ws_destino, r=rango_dest, v=valor: setattr(d.Range(r), "Value", v))
-                    print(f"  ✓ {hoja_orig!r:25s} → {hoja_dest!r}")
+            for hoja_o, rango_o, hoja_d, rango_d in OPERACIONES:
+
+                ws_o = buscar_hoja(wb_validacion, hoja_o)
+                ws_d = buscar_hoja(wb_destino, hoja_d)
+
+                if ws_o and ws_d:
+                    valor = com_call(lambda o=ws_o, r=rango_o: o.Range(r).Value)
+                    com_call(lambda d=ws_d, r=rango_d, v=valor: setattr(d.Range(r), "Value", v))
+
+                    print(f"  ✓ {hoja_o} → {hoja_d}")
                 else:
-                    faltante = []
-                    if not ws_origen:  faltante.append(f"origen={hoja_orig!r}")
-                    if not ws_destino: faltante.append(f"destino={hoja_dest!r}")
-                    print(f"  ✗ Hoja no encontrada: {', '.join(faltante)}")
+                    print(f"  ✗ Hoja faltante: {hoja_o} o {hoja_d}")
                     errores += 1
 
-            excel.Calculation = -4105       # Automatic
+            excel.Calculation = -4105  # automático
             wb_destino.Save()
 
             if errores == 0:
-                print("\n✓ Guardado exitoso — sin errores.")
+                print("✓ Proceso Flujo Caja completado sin errores")
             else:
-                print(f"\n⚠ Guardado con {errores} operación(es) fallida(s).")
+                print(f"⚠ Proceso Flujo Caja con {errores} errores")
 
         except Exception as e:
-            print(f"\n✗ ERROR INESPERADO EN MATRIZ COM: {e}")
+            print(f"✗ ERROR en Flujo Caja: {e}")
 
         finally:
-            # Limpieza y liberación de punteros
-            for wb in (wb_presupuesto, wb_destino):
-                try:
-                    if wb: wb.Close(False)
-                except Exception: pass
+            # -----------------------------
+            # CIERRE SEGURO Y ORDENADO
+            # -----------------------------
             try:
-                if excel: excel.Quit()
-            except Exception: pass
+                if wb_validacion:
+                    wb_validacion.Close(False)
+            except:
+                pass
 
-            excel = wb_presupuesto = wb_destino = None
+            try:
+                if wb_destino:
+                    wb_destino.Close(False)
+            except:
+                pass
+
+            try:
+                if excel:
+                    excel.Quit()
+            except:
+                pass
+
+            wb_validacion = None
+            wb_destino = None
+            excel = None
+            
             gc.collect()
-            pythoncom.CoUninitialize()
+            try:
+                pythoncom.CoUninitialize()
+            except:
+                pass
 
-        return pid_excel
+            print(f"Tiempo total Flujo Caja: {round(time.time() - inicio, 2)}s")
 
-    # --- COORDINACIÓN ASÍNCRONA ---
+    # Ejecutar en hilo aislado (max_workers=1 garantiza exclusión mutua COM)
     loop = asyncio.get_running_loop()
-    
     with ThreadPoolExecutor(max_workers=1) as executor:
-        pid_generado = await loop.run_in_executor(executor, _ejecutar_flujo_sync)
-
-    # Si se llegó a levantar Excel, esperamos y limpiamos de manera asíncrona
-    if pid_generado is not None:
-        await asyncio.sleep(1)
-        forzar_cierre_proceso(pid_generado)
-
-    print(f"\nTiempo total de ejecución: {round(time.time() - inicio, 2)} segundos")
+        await loop.run_in_executor(executor, _ejecutar_com_sync)

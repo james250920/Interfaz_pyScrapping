@@ -36,15 +36,7 @@ def obtener_pid_excel(excel_app):
 
 
 def forzar_cierre_proceso(pid):
-    if pid is None:
-        return
-    try:
-        handle = win32api.OpenProcess(1, False, pid)
-        win32api.TerminateProcess(handle, 0)
-        win32api.CloseHandle(handle)
-        print(f"  🔪 Proceso Excel (PID {pid}) terminado forzosamente.")
-    except Exception:
-        pass  
+    pass # Removido por regla de no forzar cierre de PID en flujo normal
 
 # Convertida a la función principal asíncrona
 async def copiar_pegar_cierre_y_validacion(ruta_principal):
@@ -182,9 +174,7 @@ async def copiar_pegar_cierre_y_validacion(ruta_principal):
     with ThreadPoolExecutor(max_workers=1) as executor:
         pid_generado = await loop.run_in_executor(executor, _ejecutar_proceso_com_sync)
 
-    # El retraso y el exterminio de procesos remanentes se ejecutan de manera asíncrona nativa
-    await asyncio.sleep(1)                 
-    forzar_cierre_proceso(pid_generado)
+    # El retraso y el exterminio de procesos remanentes se han removido
 
     print(f"\nTiempo total de integración: {round(time.time() - inicio, 2)} segundos")
 

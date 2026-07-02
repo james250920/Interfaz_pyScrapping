@@ -3,6 +3,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import win32com.client
 import pythoncom
+import gc
 
 # Convertida a función principal asíncrona
 async def limpiar_hojas_excel(ruta_archivo):
@@ -55,7 +56,10 @@ async def limpiar_hojas_excel(ruta_archivo):
                     excel.Quit()
                 except Exception as e_quit:
                     print(f"Error al intentar cerrar la instancia de Excel: {e_quit}")
-                    
+            wb = None
+            excel = None
+            gc.collect()
+            
             # CRÍTICO: Libera los recursos del entorno COM antes de cerrar el hilo
             pythoncom.CoUninitialize()
 

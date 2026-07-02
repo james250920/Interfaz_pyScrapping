@@ -72,8 +72,10 @@ async def actualizar_gastos_capital(ruta_principal: str, max_workers: int = 8):
                 for row in df_filtrado.itertuples(index=False, name=None):
                     ws_copia.append(list(row))
 
-                wb.save(ruta_archivo)
+                temp_file = ruta_archivo + ".tmp"
+                wb.save(temp_file)
                 wb.close() # Cierre explícito del puntero físico del archivo
+                os.replace(temp_file, ruta_archivo)
 
                 resultado.update({
                     "ok": True,

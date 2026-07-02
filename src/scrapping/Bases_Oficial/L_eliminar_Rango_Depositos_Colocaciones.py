@@ -41,8 +41,10 @@ async def limpiar_hojas_excel(ruta_principal):
                     print(f"  ⚠ No se pudo limpiar '{nombre_hoja}'. Error: {e_hoja}")
 
             print("Guardando archivo en el disco...")
-            wb.save(ruta_archivo)
+            temp_file = ruta_archivo + ".tmp"
+            wb.save(temp_file)
             wb.close()  # Cierre explícito para liberar la RAM de las 72,000 celdas
+            os.replace(temp_file, ruta_archivo)
             print("✓ Archivo guardado correctamente sin bloquear el flujo principal.")
 
         except PermissionError:

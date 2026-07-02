@@ -32,11 +32,11 @@ class ScrappingWorker(QThread):
             scrapping_main(
                 self.directorio, self.anio, self.mes, self.fecha_cierre,
                 on_progreso=self.progress.emit,
+                check_cancel=self.isInterruptionRequested
             )
             self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
-
 
 class MainWindow(QMainWindow):
     def __init__(self, ruta_raiz):
@@ -397,7 +397,9 @@ class MainWindow(QMainWindow):
         # Ejecutar scrapping en hilo de fondo
         self._worker = ScrappingWorker(directorio, anio, mes, fecha_cierre_sistema)
         self._worker.finished.connect(self._on_scrapping_finished)
+        self._worker.finished.connect(self._release_worker)
         self._worker.error.connect(self._on_scrapping_error)
+        self._worker.error.connect(self._release_worker)
         self._worker.progress.connect(self._on_scrapping_progress)
         self._worker.start()
 
@@ -417,7 +419,31 @@ class MainWindow(QMainWindow):
 
     def _on_scrapping_error(self, mensaje):
         self._reset_ui_state()
-        show_error(self, "Error de Ejecución", f"Ocurrió un problema durante la extracción:\n{mensaje}")
+        if "Proceso cancelado" not in str(mensaje):
+            show_error(self, "Error de Ejecución", f"Ocurrió un problema durante la extracción:\n{mensaje}")
 
     def _on_scrapping_progress(self, mensaje):
         self.lbl_progreso.setText(mensaje)
+
+    def _release_worker(self):
+        """Limpia la referencia al worker cuando termina (éxito o error)."""
+        self._worker = None
+
+    # ── Cierre seguro de la ventana ─────────────────────────────────
+    def closeEvent(self, event):
+        """Intercepta el cierre para terminar el worker si sigue activo."""
+        if self._worker is not None and self._worker.isRunning():
+            # 1. Pedir al hilo que se detenga de forma cooperativa
+            self._worker.requestInterruption()
+
+            # 2. Esperar hasta 10 segundos para que termine limpiamente (Excel necesita tiempo)
+            terminado = self._worker.wait(10000)
+
+            if not terminado:
+                # 3. Si no terminó, forzar la terminación del hilo
+                # Esto puede dejar Excel abierto, pero la UI queda cerrable.
+                print("[Advertencia] Worker no terminó a tiempo — forzando término.")
+                self._worker.terminate()
+                self._worker.wait(1000)
+
+        event.accept()

@@ -93,7 +93,10 @@ def cambiar_formato(ruta_principal):
         print(f"Completo FBK alineado al FC. Procesadas {filas_flu} filas.")
         
         print("Guardando cambios...")
-        workbook.save(ruta_excel)
+        temp_file = ruta_excel + ".tmp"
+        workbook.save(temp_file)
+        workbook.close()
+        os.replace(temp_file, ruta_excel)
         print("Proceso completo de ambas hojas ejecutado exitosamente.")
 
     except PermissionError:

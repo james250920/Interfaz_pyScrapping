@@ -5,6 +5,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import win32com.client as win32
 import pythoncom
+import gc
 
 # Modificada a función principal asíncrona
 async def limpiar_datos(ruta_archivo, mes):
@@ -92,6 +93,10 @@ async def limpiar_datos(ruta_archivo, mes):
                 except Exception as e:
                     print(f"✗ Error al cerrar Excel: {e}")
             
+            wb = None
+            excel = None
+            gc.collect()
+            
             try:
                 # CRÍTICO: Libera el entorno COM antes de cerrar el hilo
                 pythoncom.CoUninitialize()
@@ -107,19 +112,5 @@ async def limpiar_datos(ruta_archivo, mes):
     with ThreadPoolExecutor(max_workers=1) as executor:
         await loop.run_in_executor(executor, _limpiar_datos_sync)
         
-    # El subprocess de Taskkill sí puede ser llamado asíncronamente de forma nativa
-    try:
-        await asyncio.sleep(1)
-        process = await asyncio.create_subprocess_shell(
-            'taskkill /f /im excel.exe',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        await process.communicate()
-        print("✓ Procesos Excel forzados cerrados de forma asíncrona")
-    except Exception as e:
-        print(f"No se pudo ejecutar taskkill asíncrono: {e}")
-        
     fin = time.time()
     print(f"\n✓ Proceso terminado en {round(fin - inicio, 2)} segundos")
-

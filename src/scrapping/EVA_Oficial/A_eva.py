@@ -1,129 +1,115 @@
 import os
 import time
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import psutil
-import pythoncom
-import win32com.client as win32
+import openpyxl
+from openpyxl.utils import range_boundaries
 
-# Convertida a función principal asíncrona
+# Mantenemos el candado para evitar saturación de RAM si se llama concurrentemente
+_excel_lock = asyncio.Lock()
+
 async def copiar_pegar(ruta_principal, anio, mes):
     inicio = time.time()
 
-    # Subfunción síncrona interna para aislar el proceso COM en el pool
-    def _procesar_sync():
-        RUTA_DESTINO = os.path.join(ruta_principal, "Eva 2026 - Información al mes.xlsm")
-        RUTA_ORIGEN = os.path.join(ruta_principal, "Base FONAFE WEB al mes.xlsm")
+    RUTA_DESTINO = os.path.join(ruta_principal, "Eva 2026 - Información al mes.xlsm")
+    RUTA_TEMP = os.path.join(ruta_principal, "Eva 2026 - TEMP.xlsm")
+    RUTA_ORIGEN = os.path.join(ruta_principal, "Base FONAFE WEB al mes.xlsm")
 
-        OPERACIONES = [
-            ("PRE ", "C4:Z8000", "BPRE", "AG4:BD8000"),
-            ("FLU", "C4:Z8000", "BFLU", "AG4:BD8000"),
-            ("ESF", "C4:Z8000", "BESF", "AG4:BD8000"),
-            ("ERI", "C4:Z8000", "BERI", "AG4:BD8000"),
-        ]
+    OPERACIONES = [
+        ("PRE ", "C4:Z8000", "BPRE", "AG4:BD8000"),
+        ("FLU", "C4:Z8000", "BFLU", "AG4:BD8000"),
+        ("ESF", "C4:Z8000", "BESF", "AG4:BD8000"),
+        ("ERI", "C4:Z8000", "BERI", "AG4:BD8000"),
+    ]
 
-        def cerrar_excels():
-            for proc in psutil.process_iter(['pid', 'name']):
-                try:
-                    if proc.info['name'] and 'EXCEL' in proc.info['name'].upper():
-                        print(f"Cerrando Excel residual PID: {proc.info['pid']}")
-                        proc.kill()
-                except:
-                    pass
+    async with _excel_lock:
+        loop = asyncio.get_running_loop()
+        # openpyxl es puro Python, corre perfecto en un executor
+        exito = await loop.run_in_executor(None, _procesar_openpyxl,
+                                           RUTA_ORIGEN, RUTA_DESTINO, RUTA_TEMP,
+                                           anio, mes, OPERACIONES)
 
-        excel = None
-        wb_origen = None
-        wb_destino = None
-
+    # Reemplazo seguro (Escritura atómica)
+    if exito:
         try:
-            # 1. Limpieza inicial de procesos huerfanos
-            cerrar_excels()
-            time.sleep(2)
-
-            # CRÍTICO: Registrar el subsistema COM para el entorno de este hilo
-            pythoncom.CoInitialize()
-
-            if not os.path.exists(RUTA_ORIGEN):
-                raise FileNotFoundError(f"No existe:\n{RUTA_ORIGEN}")
-
-            if not os.path.exists(RUTA_DESTINO):
-                raise FileNotFoundError(f"No existe:\n{RUTA_DESTINO}")
-
-            print("✓ Archivos verificados en disco.")
-
-            # 2. Inicialización segura del Servidor de Excel
-            excel = win32.DispatchEx("Excel.Application")
-            
-            excel.Visible = False
-            excel.DisplayAlerts = False
-            excel.ScreenUpdating = False
-            excel.EnableEvents = False
-            excel.AskToUpdateLinks = False
-            excel.Interactive = False
-
-            time.sleep(1)
-
-            print("Abriendo archivo origen...")
-            wb_origen = excel.Workbooks.Open(RUTA_ORIGEN, UpdateLinks=0, ReadOnly=True)
-
-            print("Abriendo archivo destino...")
-            wb_destino = excel.Workbooks.Open(RUTA_DESTINO, UpdateLinks=0)
-
-            # 3. Escritura de variables de cabecera
-            hoja_bpre = wb_destino.Worksheets("BPRE")
-            hoja_bpre.Range("A2").Value = anio
-            hoja_bpre.Range("B2").Value = mes
-            print(f"✓ Cabecera BPRE actualizada ({anio} - Mes: {mes})")
-
-            # 4. Bloque de transferencia de datos masivos
-            for hoja_orig, rango_orig, hoja_dest, rango_dest in OPERACIONES:
-                try:
-                    ws_origen = wb_origen.Worksheets(hoja_orig)
-                    ws_destino = wb_destino.Worksheets(hoja_dest)
-
-                    # Transferencia directa por matriz de memoria (Rápido)
-                    datos = ws_origen.Range(rango_orig).Value
-                    ws_destino.Range(rango_dest).Value = datos
-
-                    print(f"  ✓ {hoja_orig} → {hoja_dest}")
-                except Exception as e:
-                    print(f"  ✗ Error transfiriendo pestaña {hoja_orig}: {e}")
-
-            print("Guardando libro de destino...")
-            wb_destino.Save()
-            print("✓ Archivo maestro guardado correctamente.")
-
+            if os.path.exists(RUTA_TEMP):
+                os.replace(RUTA_TEMP, RUTA_DESTINO)
+                print("✓ Archivo maestro guardado y reemplazado correctamente.")
         except Exception as e:
-            print(f"\n✗ ERROR GENERAL EN HILO DE TRANSFERENCIA:\n{e}")
+            print(f"✗ Error reemplazando archivo: {e}")
 
-        finally:
-            # Clausura y liberación estructurada de objetos del hilo
-            try:
-                if wb_origen: wb_origen.Close(False)
-            except: pass
-            try:
-                if wb_destino: wb_destino.Close(True)
-            except: pass
-            try:
-                if excel: excel.Quit()
-            except: pass
+    print(f"Tiempo total: {round(time.time() - inicio, 2)}s")
 
-            excel = wb_origen = wb_destino = None
+
+# =========================
+# FUNCIÓN SÍNCRONA OPENPYXL
+# =========================
+def _procesar_openpyxl(ruta_origen, ruta_destino, ruta_temp, anio, mes, operaciones):
+    wb_origen = None
+    wb_destino = None
+
+    try:
+        if not os.path.exists(ruta_origen):
+            raise FileNotFoundError(ruta_origen)
+
+        if not os.path.exists(ruta_destino):
+            raise FileNotFoundError(ruta_destino)
+
+        print("Cargando archivo origen en memoria (esto puede tardar)...")
+        # data_only=True extrae los VALORES y no las fórmulas
+        wb_origen = openpyxl.load_workbook(ruta_origen, data_only=True, read_only=True)
+
+        print("Cargando archivo destino en memoria...")
+        # keep_vba=True es CRÍTICO para no destruir el .xlsm
+        wb_destino = openpyxl.load_workbook(ruta_destino, keep_vba=True)
+
+        # 1. Escritura de Cabecera
+        ws_bpre = wb_destino["BPRE"]
+        ws_bpre["A2"] = anio
+        ws_bpre["B2"] = mes
+
+        # 2. Transferencia masiva
+        for hoja_o, rng_o, hoja_d, rng_d in operaciones:
+            ws_o = wb_origen[hoja_o]
+            ws_d = wb_destino[hoja_d]
+
+            # Calculamos las coordenadas numéricas de los rangos (Ej: A1 -> col=1, row=1)
+            min_col_o, min_row_o, max_col_o, max_row_o = range_boundaries(rng_o)
+            min_col_d, min_row_d, max_col_d, max_row_d = range_boundaries(rng_d)
+
+            print(f"Transfiriendo {hoja_o} → {hoja_d}...")
             
-            # Forzado de recolección de basura de punteros COM
-            import gc
-            gc.collect()
-            pythoncom.CoUninitialize()
-            
-            # Limpieza final de procesos retenidos en segundo plano
-            cerrar_excels()
+            # iter_rows con values_only=True es la forma más rápida de leer en openpyxl
+            datos_origen = ws_o.iter_rows(min_row=min_row_o, max_row=max_row_o,
+                                          min_col=min_col_o, max_col=max_col_o, 
+                                          values_only=True)
 
-    # --- COORDINACIÓN ASÍNCRONA ---
-    loop = asyncio.get_running_loop()
-    
-    # max_workers=1 asegura que no interfiera con otros libros COM abiertos en paralelo
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        await loop.run_in_executor(executor, _procesar_sync)
+            # Insertamos fila por fila y celda por celda en el destino
+            for i_row, fila in enumerate(datos_origen):
+                for i_col, valor in enumerate(fila):
+                    # Solo escribimos si el valor no es nulo para ganar algo de velocidad
+                    if valor is not None:
+                        ws_d.cell(row=min_row_d + i_row, column=min_col_d + i_col, value=valor)
 
-    print(f"\nTiempo total de la operación: {round(time.time() - inicio, 2)} segundos")
+            print(f"  ✓ {hoja_o} completado.")
 
+        # 3. Guardado Atómico
+        print("Guardando archivo temporal...")
+        if os.path.exists(ruta_temp):
+            try:
+                os.remove(ruta_temp)
+            except:
+                pass
+                
+        wb_destino.save(ruta_temp)
+        return True
+
+    except Exception as e:
+        print(f"\n✗ ERROR EN PROCESO OPENPYXL:\n{e}")
+        return False
+
+    finally:
+        # En openpyxl siempre debemos invocar el cierre, especialmente con read_only=True
+        if wb_origen:
+            wb_origen.close()
+        if wb_destino:
+            wb_destino.close()

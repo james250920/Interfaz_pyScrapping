@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import win32com.client as win32
 import pywintypes
 import pythoncom
+import gc
 
 RPC_E_CALL_REJECTED = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
@@ -95,6 +96,10 @@ async def actualizar_datos_iniciales(ruta_principal, anio, mes, fecha_cierre_sis
                 excel.Quit()
             except:
                 pass
+
+            wb = None
+            excel = None
+            gc.collect()
 
             # CRÍTICO: Liberar COM al finalizar el trabajo del hilo
             try:
