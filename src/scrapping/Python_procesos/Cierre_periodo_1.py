@@ -7,7 +7,6 @@ import pythoncom
 import win32com.client as win32
 import pywintypes
 
-
 RPC_E_CALL_REJECTED = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
 
@@ -24,9 +23,9 @@ def com_call(fn, reintentos=12, pausa=1.0):
             else:
                 raise
 
-# Convertida a función principal asíncrona
+# Función principal asíncrona corregida
 async def cierre_periodo(ruta_principal):
-    # Subfunción síncrona interna que correrá en ThreadPoolExecutor
+    
     def _cierre_sync():
         ruta_destino = os.path.join(ruta_principal, "Estado de Cierre al mes.xlsm")
         ruta_ejec = os.path.join(ruta_principal, "CIERRE", "Estado_de_Cierre_del_Periodo_Ejecucion.xlsx")
@@ -43,7 +42,6 @@ async def cierre_periodo(ruta_principal):
         ws_destino_marco = None
 
         try:
-
             # Verificar que los archivos existen antes de intentar abrir Excel
             missing = []
             for p, label in ((ruta_ejec, 'CIERRE Ejecución'), (ruta_marco, 'CIERRE Marco'), (ruta_destino, 'Destino')):
@@ -56,8 +54,10 @@ async def cierre_periodo(ruta_principal):
                     print(f"  - {lab}: {p}")
                 return
 
+            print("Inicializando COM...")
             pythoncom.CoInitialize()
 
+            print("Iniciando instancia de Excel...")
             excel = com_call(lambda: win32.DispatchEx("Excel.Application"))
 
             try:
@@ -70,17 +70,44 @@ async def cierre_periodo(ruta_principal):
 
             print("Abriendo archivos...")
 
-            wb_ejec = com_call(lambda: excel.Workbooks.Open(ruta_ejec, UpdateLinks=False, ReadOnly=True))
-            wb_marco = com_call(lambda: excel.Workbooks.Open(ruta_marco, UpdateLinks=False, ReadOnly=True))
-            wb_destino = com_call(lambda: excel.Workbooks.Open(ruta_destino, UpdateLinks=False, ReadOnly=False))
+            print("Abriendo Estado_de_Cierre_del_Periodo_Ejecucion.xlsx...")
+            wb_ejec = com_call(lambda: excel.Workbooks.Open(
+                ruta_ejec,
+                UpdateLinks=False,
+                ReadOnly=True,
+                IgnoreReadOnlyRecommended=True
+            ))
+            pythoncom.PumpWaitingMessages()
+            time.sleep(0.5)
 
-            ws_origen_ejec = wb_ejec.Worksheets(1)
-            ws_origen_marco = wb_marco.Worksheets(1)
+            print("Abriendo Estado_de_Cierre_del_Periodo_Formulacion.xlsx...")
+            wb_marco = com_call(lambda: excel.Workbooks.Open(
+                ruta_marco,
+                UpdateLinks=False,
+                ReadOnly=True,
+                IgnoreReadOnlyRecommended=True
+            ))
+            pythoncom.PumpWaitingMessages()
+            time.sleep(0.5)
+
+            print("Abriendo Estado de Cierre al mes.xlsm...")
+            wb_destino = com_call(lambda: excel.Workbooks.Open(
+                ruta_destino,
+                UpdateLinks=False,
+                ReadOnly=False,
+                IgnoreReadOnlyRecommended=True
+            ))
+            pythoncom.PumpWaitingMessages()
+            time.sleep(0.5)
+
+            # Obtener hojas de origen de forma segura
+            ws_origen_ejec = com_call(lambda: wb_ejec.Worksheets(1))
+            ws_origen_marco = com_call(lambda: wb_marco.Worksheets(1))
 
             # Asegurarse de que las hojas destino existen
             try:
-                ws_destino_ejec = wb_destino.Worksheets("Estado Cierre Ejec")
-                ws_destino_marco = wb_destino.Worksheets("Estado Cierre Marco")
+                ws_destino_ejec = com_call(lambda: wb_destino.Worksheets("Estado Cierre Ejec"))
+                ws_destino_marco = com_call(lambda: wb_destino.Worksheets("Estado Cierre Marco"))
             except Exception:
                 hojas = [ws.Name for ws in wb_destino.Worksheets]
                 print("✗ No se encontraron las hojas destino esperadas en el libro destino. Hojas disponibles:")
@@ -89,48 +116,35 @@ async def cierre_periodo(ruta_principal):
                 return
 
             print("Limpiando contenido...")
+            com_call(lambda: ws_destino_ejec.Range("B1:M1000").ClearContents())
+            com_call(lambda: ws_destino_marco.Range("B1:M1000").ClearContents())
 
-            com_call(lambda: ws_destino_ejec.Range("B1:M1000").Clear())
-            com_call(lambda: ws_destino_marco.Range("B1:M1000").Clear())
-
-            # NOTA IMPORTANTE: se reemplazó Copy()/PasteSpecial() por una
-            # transferencia directa de valores (Range.Value = Range.Value).
-            # Copy()/PasteSpecial usan el portapapeles de Windows, que es un
-            # recurso ÚNICO y GLOBAL del sistema operativo. Como este script
-            # corre EN PARALELO con "copiar_pegar_form_ejecu.py" (otra
-            # instancia de Excel automatizada al mismo tiempo), ambos procesos
-            # pueden pelear por el portapapeles y corromper la operación,
-            # lo que produce errores intermitentes y poco descriptivos como
-            # "(-2147352573, 'No se ha encontrado el miembro.', None, None)".
-            # Al transferir por .Value se evita el portapapeles por completo
-            # y además es más rápido.
+            # --- SUBFUNCIÓN DE COPIADO BLINDADA ---
+            def _copiar_valores(ws_origen, ws_destino, rango="B1:M1000"):
+                # Se envuelven las operaciones nativas COM individuales en el com_call
+                valores = com_call(lambda: ws_origen.Range(rango).Value)
+                
+                def _asignar():
+                    ws_destino.Range(rango).Value = valores
+                com_call(_asignar)
 
             print("Copiando Estado Cierre Ejec...")
-
-            def _copiar_valores(ws_origen, ws_destino, rango="B1:M1000"):
-                valores = ws_origen.Range(rango).Value
-                ws_destino.Range(rango).Value = valores
-
-            com_call(lambda: _copiar_valores(ws_origen_ejec, ws_destino_ejec))
+            # Llamada directa (sin lambda anidado corrupto en com_call)
+            _copiar_valores(ws_origen_ejec, ws_destino_ejec)
 
             print("Copiando Estado Cierre Marco...")
+            _copiar_valores(ws_origen_marco, ws_destino_marco)
 
-            com_call(lambda: _copiar_valores(ws_origen_marco, ws_destino_marco))
-
+            print("Guardando libro destino...")
             com_call(lambda: wb_destino.Save())
-
             print("✓ Archivo guardado correctamente")
 
         except Exception as e:
-
-            print(f"\n✗ ERROR: {e}")
+            print(f"\n✗ ERROR en Cierre Periodo: {type(e).__name__} - {e}")
 
         finally:
-            # Soltar referencias a Worksheets/Ranges ANTES de cerrar libros
-            # y salir de Excel. Si el garbage collector de Python no libera
-            # estos objetos COM (RCW) antes del Quit(), EXCEL.EXE puede
-            # quedar como proceso zombi en segundo plano aunque Quit() se
-            # haya llamado "correctamente".
+            print("=== LIMPIANDO RECURSOS EN CIERRE ===")
+            # Soltar referencias COM explícitamente para evitar bloqueos
             ws_origen_ejec = None
             ws_origen_marco = None
             ws_destino_ejec = None
@@ -167,9 +181,11 @@ async def cierre_periodo(ruta_principal):
             excel = None
 
             gc.collect()
+            time.sleep(0.5)
 
             try:
                 pythoncom.CoUninitialize()
+                print("✓ COM desinicializado en Cierre")
             except Exception:
                 pass
 
@@ -177,7 +193,5 @@ async def cierre_periodo(ruta_principal):
     
     # --- COORDINACIÓN ASÍNCRONA ---
     loop = asyncio.get_running_loop()
-    
-    # max_workers=1 para garantizar exclusión mutua en operaciones COM
     with ThreadPoolExecutor(max_workers=1) as executor:
         await loop.run_in_executor(executor, _cierre_sync)
