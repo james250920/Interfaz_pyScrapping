@@ -174,7 +174,7 @@ async def _pipeline_async(ruta_principal, anio, mes, fecha_cierre_sistema, repor
 
     verificar_cancelacion()
     reportar("Cambiando formato...")
-    await loop.run_in_executor(None, K.cambiar_formato, ruta_principal)
+    await K.cambiar_formato(ruta_principal)
 
     verificar_cancelacion()
     reportar("Limpiando depósitos/colocaciones...")
