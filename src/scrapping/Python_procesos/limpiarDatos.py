@@ -21,7 +21,7 @@ async def limpiar_datos(ruta_archivo, mes):
             # CRÍTICO: Inicializa el entorno COM para este hilo específico del pool
             pythoncom.CoInitialize()
             
-            excel = win32.gencache.EnsureDispatch("Excel.Application")
+            excel = win32.DispatchEx("Excel.Application")
             
             excel.Visible = False
             excel.DisplayAlerts = False
@@ -79,6 +79,9 @@ async def limpiar_datos(ruta_archivo, mes):
             
         finally:
             print("\n=== INICIANDO LIMPIEZA DE RECURSOS ===")
+            # Soltar referencias a hojas antes de cerrar (mismo motivo que
+            # en los otros scripts: evitar EXCEL.EXE zombi).
+            gc.collect()
             if wb:
                 try:
                     wb.Close(SaveChanges=True)
