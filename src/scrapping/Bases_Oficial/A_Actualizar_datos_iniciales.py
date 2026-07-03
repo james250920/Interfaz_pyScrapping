@@ -11,6 +11,16 @@ import gc
 RPC_E_CALL_REJECTED = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
 
+# Constantes literales en vez de win32.constants.* : con DispatchEx (late
+# binding) el módulo win32com.client.constants solo se rellena si existe
+# caché de gencache (EnsureDispatch/makepy). Sin esa caché, cualquier acceso
+# a win32.constants.ALGO lanza AttributeError. Como este AttributeError no
+# es un pywintypes.com_error, com_call() NO lo reintenta y, peor, el try/
+# finally original no tenía ningún except, así que la excepción se propagaba
+# sin capturar y mataba todo el pipeline en silencio.
+XL_CALCULATION_MANUAL = -4135
+XL_CALCULATION_AUTOMATIC = -4105
+
 # Se mantiene la lógica exacta de reintentos síncronos de COM
 def com_call(fn, reintentos=12, pausa=1.0):
     for intento in range(1, reintentos + 1):
@@ -43,7 +53,12 @@ async def actualizar_datos_iniciales(ruta_principal, anio, mes, fecha_cierre_sis
         # CRÍTICO: Inicializar COM en este hilo secundario antes de instanciar Excel
         pythoncom.CoInitialize()
         
-        excel = win32.gencache.EnsureDispatch("Excel.Application")
+        # Se usa DispatchEx (no EnsureDispatch) para forzar SIEMPRE una instancia
+        # nueva y aislada de Excel. EnsureDispatch consulta el ROT (Running Object
+        # Table) de Windows y puede engancharse a un Excel que el usuario ya tenga
+        # abierto manualmente, heredando diálogos modales pendientes o cambios sin
+        # guardar — eso es lo que provoca los congelamientos intermitentes.
+        excel = win32.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
         excel.ScreenUpdating = False
@@ -57,7 +72,7 @@ async def actualizar_datos_iniciales(ruta_principal, anio, mes, fecha_cierre_sis
                 ReadOnly=False
             ))
             
-            com_call(lambda: setattr(excel, "Calculation", win32.constants.xlCalculationManual))
+            com_call(lambda: setattr(excel, "Calculation", XL_CALCULATION_MANUAL))
 
             ws = wb.Worksheets(HOJA)
 
@@ -73,10 +88,17 @@ async def actualizar_datos_iniciales(ruta_principal, anio, mes, fecha_cierre_sis
             wb.Save()
             print("Proceso en Excel completado con éxito.")
 
+        except Exception as e:
+            # IMPORTANTE: antes no existía este except. Cualquier error
+            # (incluso uno inesperado no relacionado a COM) se propagaba
+            # sin control y mataba todo el pipeline sin mensaje claro.
+            print(f"✗ ERROR al actualizar datos iniciales: {e}")
+            raise
+
         finally:
             # Limpieza segura de recursos dentro del hilo
             try:
-                com_call(lambda: setattr(excel, "Calculation", win32.constants.xlCalculationAutomatic))
+                com_call(lambda: setattr(excel, "Calculation", XL_CALCULATION_AUTOMATIC))
             except:
                 pass
 
@@ -115,5 +137,3 @@ async def actualizar_datos_iniciales(ruta_principal, anio, mes, fecha_cierre_sis
         await loop.run_in_executor(executor, _actualizar_sync)
         
     print(f"✓ Datos iniciales actualizados en {round(time.time() - inicio_tiempo, 2)} segundos.")
-
-

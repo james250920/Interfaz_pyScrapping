@@ -13,6 +13,13 @@ import openpyxl
 
 RPC_E_CALL_REJECTED         = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
+VBA_E_IGNORE                 = -2146777998  # 0x800AC472, error transitorio de "Excel ocupado"
+
+HRESULTS_REINTENTABLES = (
+    RPC_E_CALL_REJECTED,
+    RPC_E_SERVERCALL_RETRYLATER,
+    VBA_E_IGNORE,
+)
 
 
 # -----------------------------
@@ -23,8 +30,8 @@ def com_call(fn, reintentos=12, pausa=2.5):
         try:
             return fn()
         except pywintypes.com_error as e:
-            if e.hresult in (RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER):
-                print(f"⏳ Excel ocupado, reintento {intento}/{reintentos}...")
+            if e.hresult in HRESULTS_REINTENTABLES:
+                print(f"⏳ Excel ocupado (hresult={e.hresult}), reintento {intento}/{reintentos}...")
                 time.sleep(pausa)
             else:
                 raise
@@ -111,17 +118,17 @@ async def copiar_pegar_validacion_presupuesto(ruta_principal):
             print("Excel iniciado (Presupuesto)")
             print("Abriendo archivos...")
 
-            wb_FC = excel.Workbooks.Open(
+            wb_FC = com_call(lambda: excel.Workbooks.Open(
                 RUTA_VALIDACION,
                 UpdateLinks=False,
                 ReadOnly=True
-            )
+            ))
 
-            wb_destino = excel.Workbooks.Open(
+            wb_destino = com_call(lambda: excel.Workbooks.Open(
                 RUTA_DESTINO,
                 UpdateLinks=False,
                 ReadOnly=False
-            )
+            ))
 
             excel.Calculation = -4135  # manual
 
@@ -139,7 +146,7 @@ async def copiar_pegar_validacion_presupuesto(ruta_principal):
                     errores += 1
 
             excel.Calculation = -4105  # automático
-            wb_destino.Save()
+            com_call(lambda: wb_destino.Save())
 
             if errores == 0:
                 print("✓ Proceso Presupuesto completado sin errores")
@@ -148,6 +155,7 @@ async def copiar_pegar_validacion_presupuesto(ruta_principal):
 
         except Exception as e:
             print(f"✗ ERROR en Presupuesto: {e}")
+            raise
 
         finally:
             # Orden estricto de cierre COM

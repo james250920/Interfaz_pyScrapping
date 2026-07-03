@@ -11,32 +11,31 @@ import win32api
 
 RPC_E_CALL_REJECTED         = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
+# 0x800AC472: "Excel no puede completar esta tarea con los recursos disponibles"
+# Aparece de forma intermitente cuando el archivo aún conserva un handle/lock
+# de la instancia de Excel anterior que se acaba de cerrar (condición de carrera).
+VBA_E_IGNORE                 = -2146777998
 
-# Se mantiene tu lógica original de reintentos síncronos
+HRESULTS_REINTENTABLES = (
+    RPC_E_CALL_REJECTED,
+    RPC_E_SERVERCALL_RETRYLATER,
+    VBA_E_IGNORE,
+)
+
+# Se mantiene tu lógica original de reintentos síncronos, ampliando los
+# códigos de error considerados transitorios/reintentables
 def com_call(fn, reintentos=12, pausa=2.5):
     for intento in range(1, reintentos + 1):
         try:
             return fn()
         except pywintypes.com_error as e:
-            if e.hresult in (RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER):
-                print(f"    ⏳ Excel ocupado, reintento {intento}/{reintentos} en {pausa}s...")
+            if e.hresult in HRESULTS_REINTENTABLES:
+                print(f"    ⏳ Excel ocupado (hresult={e.hresult}), reintento {intento}/{reintentos} en {pausa}s...")
                 time.sleep(pausa)
             else:
                 raise
     raise RuntimeError(f"Excel rechazó la llamada tras {reintentos} reintentos.")
 
-
-def obtener_pid_excel(excel_app):
-    try:
-        hwnd = excel_app.Hwnd
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        return pid
-    except Exception:
-        return None
-
-
-def forzar_cierre_proceso(pid):
-    pass # Removido por regla de no forzar cierre de PID en flujo normal
 
 # Convertida a la función principal asíncrona
 async def copiar_pegar_cierre_y_validacion(ruta_principal):
@@ -110,8 +109,7 @@ async def copiar_pegar_cierre_y_validacion(ruta_principal):
                     shutil.rmtree(patron, ignore_errors=True)
 
             excel = win32.DispatchEx("Excel.Application")
-            pid_excel = obtener_pid_excel(excel)  
-            print(f"Proceso Excel iniciado en hilo secundario (PID: {pid_excel})\n")
+            print(f"Proceso Excel iniciado en hilo secundario\n")
 
             excel.Visible        = False
             excel.DisplayAlerts  = False
@@ -119,9 +117,9 @@ async def copiar_pegar_cierre_y_validacion(ruta_principal):
             excel.EnableEvents   = False
 
             print("Abriendo archivos de control...\n")
-            wb_cierre1 = excel.Workbooks.Open(RUTA_CIERRE_1, UpdateLinks=False, ReadOnly=True)
-            wb_cierre2 = excel.Workbooks.Open(RUTA_CIERRE_2, UpdateLinks=False, ReadOnly=True)
-            wb_destino = excel.Workbooks.Open(RUTA_DESTINO,  UpdateLinks=False, ReadOnly=False)
+            wb_cierre1 = com_call(lambda: excel.Workbooks.Open(RUTA_CIERRE_1, UpdateLinks=False, ReadOnly=True))
+            wb_cierre2 = com_call(lambda: excel.Workbooks.Open(RUTA_CIERRE_2, UpdateLinks=False, ReadOnly=True))
+            wb_destino = com_call(lambda: excel.Workbooks.Open(RUTA_DESTINO,  UpdateLinks=False, ReadOnly=False))
 
             excel.Calculation        = -4135  # Manual
             excel.CalculateBeforeSave = False
@@ -137,7 +135,7 @@ async def copiar_pegar_cierre_y_validacion(ruta_principal):
             errores2 = ejecutar_operaciones(wb_cierre2, wb_destino, OPS_CIERRE_2, "Bloque 2")
 
             excel.Calculation = -4105  # Automático
-            wb_destino.Save()
+            com_call(lambda: wb_destino.Save())
 
             total_errores = errores1 + errores2
             if total_errores == 0:
@@ -147,6 +145,10 @@ async def copiar_pegar_cierre_y_validacion(ruta_principal):
 
         except Exception as e:
             print(f"\n✗ ERROR INESPERADO EN MATRIZ COM: {e}")
+            # IMPORTANTE: se relanza para que el pipeline se detenga y no
+            # continúe como si el copiado de Cierre/Validación se hubiera
+            # completado, cuando en realidad la Base FONAFE quedó incompleta.
+            raise
 
         finally:
             # Asegurar cierre de libros y desinicialización
@@ -172,9 +174,4 @@ async def copiar_pegar_cierre_y_validacion(ruta_principal):
     
     # max_workers=1 previene colisiones de punteros en la memoria de la instancia de Excel abierta
     with ThreadPoolExecutor(max_workers=1) as executor:
-        pid_generado = await loop.run_in_executor(executor, _ejecutar_proceso_com_sync)
-
-    # El retraso y el exterminio de procesos remanentes se han removido
-
-    print(f"\nTiempo total de integración: {round(time.time() - inicio, 2)} segundos")
-
+        await loop.run_in_executor(executor, _ejecutar_proceso_com_sync)

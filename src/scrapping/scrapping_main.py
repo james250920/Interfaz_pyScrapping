@@ -122,12 +122,12 @@ async def _pipeline_async(ruta_principal, anio, mes, fecha_cierre_sistema, repor
     await asyncio.sleep(2)
 
     verificar_cancelacion()
-    # Cierre + Copia en paralelo (funciones síncronas via executor)
-    reportar("Cierre y copia en paralelo...")
-    await asyncio.gather(
-        loop.run_in_executor(None, Cierre_periodo_1.cierre_periodo, ruta_principal),
-        loop.run_in_executor(None, copiar_pegar_form_ejecu.copiar_pegar_form_ejecu, ruta_principal),
-    )
+    reportar("Cierre...")
+    await Cierre_periodo_1.cierre_periodo(ruta_principal)
+
+    verificar_cancelacion()
+    reportar("Copiando formulación/ejecución...")
+    await copiar_pegar_form_ejecu.copiar_pegar_form_ejecu(ruta_principal)
     print("Proceso Python_procesos finalizado")
 
     # ═══ Fase 2: Bases_Oficial ══════════════════════════════════════════════

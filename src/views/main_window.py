@@ -3,7 +3,7 @@ import datetime
 from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit,
                              QPushButton, QHBoxLayout, QVBoxLayout, QFileDialog,
                              QGraphicsDropShadowEffect, QFrame,QSizePolicy)
-from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtCore import Qt, QThread, Signal, QSize,QTimer  
 from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
@@ -15,7 +15,7 @@ from src.views.components.widgets_personalizados import (
 from src.views.components.dialogs import show_success, show_error, show_warning, show_info
 from src.views.theme import *
 from src.models.database import obtener_datos_periodo
-from src.scrapping.scrapping_main import scrapping_main
+from src.scrapping.scrapping_main import scrapping_main, eliminar_procesos_excel
 
 
 class ScrappingWorker(QThread):
@@ -38,10 +38,10 @@ class ScrappingWorker(QThread):
                 on_progreso=self.progress.emit,
                 check_cancel=self.isInterruptionRequested
             )
-            self.finished.emit()
         except Exception as e:
             self.error.emit(str(e))
-
+        finally:
+            self.finished.emit()
 
 class MainWindow(QMainWindow):
     def __init__(self, ruta_raiz):
@@ -641,14 +641,43 @@ class MainWindow(QMainWindow):
 
     # ── Cierre seguro de la ventana ─────────────────────────────────
     def closeEvent(self, event):
-        """Intercepta el cierre para terminar el worker si sigue activo."""
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-            terminado = self._worker.wait(10000)
+        """Intercepta el cierre para terminar el worker sin congelar la UI."""
+        # Si ya no hay worker corriendo, cerramos normal
+        if self._worker is None or not self._worker.isRunning():
+            event.accept()
+            return
 
-            if not terminado:
-                print("[Advertencia] Worker no terminó a tiempo — forzando término.")
-                self._worker.terminate()
-                self._worker.wait(1000)
+        # Ya estamos en proceso de cierre seguro: ignoramos clics repetidos de la X
+        if getattr(self, "_cerrando", False):
+            event.ignore()
+            return
 
-        event.accept()
+        event.ignore()  # No cerramos todavía
+        self._cerrando = True
+
+        # Feedback visual sin bloquear
+        self.lbl_progreso.setText("Cerrando de forma segura, espera un momento...")
+        self.progreso_widget.setVisible(True)
+        self.boton_iniciar.setEnabled(False)
+        self.setEnabled(False)  # evita que sigan llegando clics mientras cerramos
+
+        self._worker.requestInterruption()
+        self._worker.finished.connect(self._cerrar_definitivamente)
+
+        # Salvavidas: si en 12s el worker sigue sin responder (p.ej. Excel colgado
+        # esperando un diálogo), forzamos el cierre igual sin bloquear la UI.
+        self._close_timeout_timer = QTimer(self)
+        self._close_timeout_timer.setSingleShot(True)
+        self._close_timeout_timer.timeout.connect(self._forzar_cierre)
+        self._close_timeout_timer.start(12000)
+
+def _cerrar_definitivamente(self):
+    if hasattr(self, "_close_timeout_timer"):
+        self._close_timeout_timer.stop()
+    self.close()
+
+def _forzar_cierre(self):
+    if self._worker is not None and self._worker.isRunning():
+        self._worker.terminate()
+        self._worker.wait(1000)
+    self.close()

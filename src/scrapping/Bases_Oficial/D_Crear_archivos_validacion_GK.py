@@ -17,7 +17,10 @@ def crear_archivos_validacion(ruta_principal):
         ws2.title = "Hoja1"
 
         wb.save(ruta)
+        wb.close()
+        
         wb2.save(ruta2)
+        wb2.close()
 
         print("Archivos creados")
 
