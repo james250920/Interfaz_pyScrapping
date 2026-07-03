@@ -16,8 +16,11 @@ def main():
     # Optimizaciones adicionales para la aplicación
     app.setStyle("Fusion") # Estilo moderno y ligero por defecto
     
-    # Obtenemos la ruta raíz absoluta del proyecto actual
-    ruta_raiz = os.path.dirname(os.path.abspath(__file__))
+    # Obtenemos la ruta raíz absoluta del proyecto actual, compatible con PyInstaller
+    if getattr(sys, 'frozen', False):
+        ruta_raiz = sys._MEIPASS
+    else:
+        ruta_raiz = os.path.dirname(os.path.abspath(__file__))
     
     # Pasamos la ruta raíz a la ventana para que busque los archivos correctamente
     ventana = MainWindow(ruta_raiz)
