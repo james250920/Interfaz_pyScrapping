@@ -1,15 +1,19 @@
 import os
 import datetime
-from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit, 
-                             QPushButton, QHBoxLayout, QVBoxLayout, QFileDialog, QGraphicsDropShadowEffect)
-from PySide6.QtCore import Qt, QThread, Signal, QPoint
-from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor
+from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit,
+                             QPushButton, QHBoxLayout, QVBoxLayout, QFileDialog,
+                             QGraphicsDropShadowEffect, QFrame,QSizePolicy)
+from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor, QPainter
+from PySide6.QtSvg import QSvgRenderer
 
 # Importamos componentes, modelos y tema centralizado
-from src.views.components.widgets_personalizados import crear_menubar, crear_imagen, crear_barra_progreso
+from src.views.components.widgets_personalizados import (
+    crear_menubar, crear_imagen, crear_barra_progreso, crear_item_check,
+    crear_fila_icono_texto, crear_boton_icono, BotonIconoHover,
+)
 from src.views.components.dialogs import show_success, show_error, show_warning, show_info
-from src.views.theme import (OSCURO, OSCURO_2, GRIS_BG, GRIS_BORDE, GRIS_DESHABILITADO,
-                            DORADO, DORADO_HOVER, BLANCO, GRIS_TEXTO, RADIUS_MD, FONT_FAMILY)
+from src.views.theme import *
 from src.models.database import obtener_datos_periodo
 from src.scrapping.scrapping_main import scrapping_main
 
@@ -38,31 +42,36 @@ class ScrappingWorker(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
+
 class MainWindow(QMainWindow):
     def __init__(self, ruta_raiz):
         super().__init__()
-        self.ruta_raiz = ruta_raiz # Guardamos la ruta del proyecto
+        self.ruta_raiz = ruta_raiz  # Guardamos la ruta del proyecto
         self._worker = None  # Referencia al hilo de scrapping
         self.setWindowTitle("Zeus Excels - Sistema de Extracción")
-        self.setFixedSize(1000, 600)
-        
+        self.setFixedSize(1120, 640)
+
         # Eliminar barra de título nativa y hacer esquinas redondeadas
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        
+
         # Variables para mover la ventana custom
         self._drag_pos = None
+        self._is_maximized = False
 
         # Configurar el icono de la ventana
         ruta_icono = os.path.join(self.ruta_raiz, "src", "assets", "icons", "icon.svg")
         self.setWindowIcon(QIcon(ruta_icono))
-        
+
         # Carga de datos usando el modelo
         self.datos_anos = obtener_datos_periodo("anios")
         self.datos_meses = obtener_datos_periodo("meses")
-        
+
         self.init_ui()
 
+    # ══════════════════════════════════════════════════════════════
+    # CONSTRUCCIÓN DE LA UI
+    # ══════════════════════════════════════════════════════════════
     def init_ui(self):
         # Contenedor principal para poder aplicar border-radius a toda la ventana
         self.main_container = QWidget(self)
@@ -70,297 +79,484 @@ class MainWindow(QMainWindow):
         self.main_container.setStyleSheet(f"""
             QWidget#MainContainer {{
                 background-color: {BLANCO};
-                border-radius: {RADIUS_MD};
+                border-radius: 12px;
                 border: 1px solid {GRIS_BORDE};
             }}
         """)
-        
-        # Layout del main container
+
         container_layout = QVBoxLayout(self.main_container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
-        
-        # ── CUSTOM TITLE BAR ─────────────────────────────────────────────
-        title_bar = QWidget()
-        title_bar.setFixedHeight(40)
-        title_bar.setStyleSheet(f"""
-            QWidget {{
-                background-color: {OSCURO};
-                border-top-left-radius: {RADIUS_MD};
-                border-top-right-radius: {RADIUS_MD};
-            }}
-        """)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(16, 0, 16, 0)
-        
-        # Eventos para mover la ventana desde la barra de título
-        title_bar.mousePressEvent = self.title_bar_mousePressEvent
-        title_bar.mouseMoveEvent = self.title_bar_mouseMoveEvent
-        
-        app_title = QLabel("SISTEMA DE DESCARGAS")
-        app_title.setStyleSheet(f"color: {DORADO}; font-weight: bold; font-family: {FONT_FAMILY}; letter-spacing: 1px;")
-        
-        btn_close = QPushButton("✕")
-        btn_close.setFixedSize(30, 30)
-        btn_close.setCursor(Qt.PointingHandCursor)
-        btn_close.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {GRIS_TEXTO};
-                border: none;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                color: white;
-                background-color: #ef4444;
-                border-radius: 4px;
-            }}
-        """)
-        btn_close.clicked.connect(self.close)
-        
-        btn_min = QPushButton("─")
-        btn_min.setFixedSize(30, 30)
-        btn_min.setCursor(Qt.PointingHandCursor)
-        btn_min.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {GRIS_TEXTO};
-                border: none;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                color: white;
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 4px;
-            }}
-        """)
-        btn_min.clicked.connect(self.showMinimized)
-        
-        title_layout.addWidget(app_title)
-        title_layout.addStretch()
-        title_layout.addWidget(btn_min)
-        title_layout.addWidget(btn_close)
-        
-        container_layout.addWidget(title_bar)
 
-        # ── CONTENIDO PRINCIPAL (Paneles Izquierdo y Derecho) ────────────
+        container_layout.addWidget(self._crear_title_bar())
+
+        # ── CONTENIDO PRINCIPAL (Paneles Izquierdo y Derecho) ────────
         content_widget = QWidget()
         layout_principal = QHBoxLayout(content_widget)
         layout_principal.setContentsMargins(0, 0, 0, 0)
         layout_principal.setSpacing(0)
 
-        # ── PANEL IZQUIERDO (Formulario) ─────────────────────────────────
-        panel_izquierdo = QWidget()
-        panel_izquierdo.setStyleSheet(f"background-color: {BLANCO}; border-bottom-left-radius: {RADIUS_MD};")
-        layout_izquierdo = QVBoxLayout(panel_izquierdo)
-        layout_izquierdo.setContentsMargins(40, 40, 40, 40)
-        layout_izquierdo.setSpacing(24)
+        layout_principal.addWidget(self._crear_panel_izquierdo(), 1)
+        layout_principal.addWidget(self._crear_panel_derecho())
 
-        # Header del Formulario
-        header_form = QWidget()
-        header_layout = QVBoxLayout(header_form)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
-        
-        lbl_titulo_form = QLabel("Configuración de Carga")
-        lbl_titulo_form.setStyleSheet(f"color: {OSCURO}; font-size: 24px; font-weight: bold; font-family: {FONT_FAMILY};")
-        
-        lbl_subtitulo = QLabel("Especifica los parámetros para iniciar la extracción")
-        lbl_subtitulo.setStyleSheet(f"color: {GRIS_TEXTO}; font-size: 13px; font-family: {FONT_FAMILY};")
-        
-        header_layout.addWidget(lbl_titulo_form)
-        header_layout.addWidget(lbl_subtitulo)
+        container_layout.addWidget(content_widget, 1)
+        container_layout.addWidget(self._crear_footer())
 
-        # Card: Directorio
-        card_dir = QWidget()
-        card_dir.setStyleSheet(f"""
+        self.setCentralWidget(self.main_container)
+
+    # ── TITLE BAR ─────────────────────────────────────────────────
+    def _crear_title_bar(self) -> QWidget:
+        title_bar = QWidget()
+        title_bar.setFixedHeight(48)
+        title_bar.setStyleSheet(f"""
             QWidget {{
-                background-color: {GRIS_BG};
-                border-radius: {RADIUS_MD};
+                background-color: {BLANCO};
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+                border-bottom: 1px solid {GRIS_BORDE};
             }}
         """)
-        layout_card_dir = QVBoxLayout(card_dir)
-        layout_card_dir.setContentsMargins(20, 20, 20, 20)
-        layout_card_dir.setSpacing(12)
-        
-        etiqueta_dir = QLabel("Directorio de trabajo")
-        etiqueta_dir.setStyleSheet(f"color: {OSCURO}; font-size: 13px; font-weight: 600; font-family: {FONT_FAMILY};")
+        title_layout = QHBoxLayout(title_bar)
+        title_layout.setContentsMargins(20, 0, 12, 0)
+        title_layout.setSpacing(10)
 
-        layout_input_dir = QHBoxLayout()
+        # Eventos para mover la ventana desde la barra de título
+        title_bar.mousePressEvent = self.title_bar_mousePressEvent
+        title_bar.mouseMoveEvent = self.title_bar_mouseMoveEvent
+        title_bar.mouseDoubleClickEvent = lambda e: self.toggle_maximizar()
+
+        # Icono pequeño (mismo icono de la app, ej. SVG de marca)
+        icono_lbl = QLabel()
+        ruta_icono = os.path.join(self.ruta_raiz, "src", "assets", "icons", "icon.svg")
+        if os.path.exists(ruta_icono):
+            pixmap = QPixmap(ruta_icono).scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icono_lbl.setPixmap(pixmap)
+        title_layout.addWidget(icono_lbl)
+
+        app_title = QLabel("SISTEMA DE EXTRACCIÓN ZEUS")
+        app_title.setStyleSheet(f"""
+            color: {ROJO};
+            font-weight: bold;
+            font-size: 13px;
+            font-family: {FONT_FAMILY_TITLE};
+            letter-spacing: 0.5px;
+        """)
+        title_layout.addWidget(app_title)
+        title_layout.addStretch()
+
+        # Botones de ventana (min / max / close) — íconos Font Awesome,
+        # cambian de color al pasar el mouse (ver BotonIconoHover)
+        btn_min = BotonIconoHover(
+            "fa5s.window-minimize", TEXTO_SECUNDARIO, TEXTO, "rgba(0,0,0,0.06)"
+        )
+        btn_min.clicked.connect(self.showMinimized)
+
+        btn_max = BotonIconoHover(
+            "fa5s.window-maximize", TEXTO_SECUNDARIO, TEXTO, "rgba(0,0,0,0.06)", tam_icono=10
+        )
+        btn_max.clicked.connect(self.toggle_maximizar)
+
+        btn_close = BotonIconoHover(
+            "fa5s.times", TEXTO_SECUNDARIO, BLANCO, "#ef4444", tam_icono=13
+        )
+        btn_close.clicked.connect(self.close)
+
+        title_layout.addWidget(btn_min)
+        title_layout.addWidget(btn_max)
+        title_layout.addWidget(btn_close)
+
+        return title_bar
+
+    # ── PANEL IZQUIERDO (Formulario) ─────────────────────────────
+    def _crear_panel_izquierdo(self) -> QWidget:
+        panel = QWidget()
+        panel.setStyleSheet(f"background-color: {BLANCO};")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(48, 36, 48, 12)
+        layout.setSpacing(10)
+
+        layout.addWidget(self._crear_logo())
+        layout.addWidget(self._crear_header_formulario())
+        layout.addWidget(self._crear_card_directorio())
+        layout.addWidget(self._crear_card_periodo())
+        layout.addStretch()
+        layout.addWidget(self._crear_progreso())
+        layout.addWidget(self._crear_boton_iniciar())
+
+        return panel
+
+    def _crear_logo(self) -> QWidget:
+        """Logo institucional. Se carga desde un único SVG
+        (logo_fonafe.svg) que ya trae integrados el ícono y el texto
+        'CORPORACIÓN FONAFE' — no se arma con labels sueltos."""
+        cont = QWidget()
+        row = QHBoxLayout(cont)
+        row.setContentsMargins(0, 0, 0, 0)
+
+        lbl_logo = QLabel()
+        alto_logo = 80 # alto objetivo del logo dentro del panel
+
+        ruta_svg = os.path.join(self.ruta_raiz, "src", "assets", "images", "logo_fonafe.svg")
+
+        if os.path.exists(ruta_svg):
+            renderer = QSvgRenderer(ruta_svg)
+            tam_base = renderer.defaultSize()
+
+            if tam_base.width() > 0 and tam_base.height() > 0:
+                ancho_logo = int(alto_logo * tam_base.width() / tam_base.height())
+            else:
+                ancho_logo = 160
+
+            # Se renderiza a 2x y se marca el devicePixelRatio para que
+            # el SVG se vea nítido en pantallas HiDPI (evita el
+            # pixelado que da usar QPixmap(path).scaled() directamente).
+            escala = 3
+            pixmap = QPixmap(ancho_logo * escala, alto_logo * escala)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.end()
+            pixmap.setDevicePixelRatio(escala)
+
+            lbl_logo.setPixmap(pixmap)
+            lbl_logo.setFixedSize(ancho_logo, alto_logo)
+        else:
+            # Fallback de texto si el SVG no está presente, para no
+            # romper la ventana mientras se agrega el asset definitivo.
+            lbl_logo.setText("CORPORACIÓN FONAFE")
+            lbl_logo.setStyleSheet(f"""
+                color: {ROJO};
+                font-size: 16px;
+                font-weight: 800;
+                font-family: {FONT_FAMILY_TITLE};
+            """)
+
+        row.addWidget(lbl_logo)
+        row.addStretch()
+        return cont
+
+    def _crear_header_formulario(self) -> QWidget:
+        header = QWidget()
+        layout = QVBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        lbl_titulo = QLabel("Configuración de Carga")
+        lbl_titulo.setStyleSheet(f"""
+            color: {TEXTO};
+            font-size: 25px;
+            font-weight: 800;
+            font-family: {FONT_FAMILY_TITLE};
+        """)
+
+        linea = QFrame()
+        linea.setFixedSize(46, 4)
+        linea.setStyleSheet(f"background-color: {ROJO}; border-radius: 2px;")
+
+        lbl_subtitulo = QLabel("Especifica los parámetros para iniciar la extracción de información.")
+        lbl_subtitulo.setWordWrap(True)
+        lbl_subtitulo.setStyleSheet(f"""
+            color: {TEXTO_SECUNDARIO};
+            font-size: 13px;
+            font-family: {FONT_FAMILY};
+        """)
+
+        layout.addWidget(lbl_titulo)
+        layout.addWidget(linea)
+        layout.addWidget(lbl_subtitulo)
+        return header
+
+    def _crear_tarjeta_base(self) -> QWidget:
+        """Tarjeta gris clara reutilizable con sombra suave."""
+        card = QWidget()
+        card.setStyleSheet(f"""
+            QWidget {{
+                background-color: {GRIS_BG};
+                border-radius: 14px;
+            }}
+        """)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 15))
+        card.setGraphicsEffect(shadow)
+        return card
+
+    def _crear_card_directorio(self) -> QWidget:
+        card = self._crear_tarjeta_base()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+
+        etiqueta = crear_fila_icono_texto(
+            "fa5s.folder", "Directorio de trabajo",
+            color_icono=TEXTO, color_texto=TEXTO
+        )
+
+        fila = QHBoxLayout()
+        fila.setSpacing(10)
+
         self.campo_ruta = QLineEdit()
-        self.campo_ruta.setPlaceholderText("C:/Ruta/a/tu/carpeta...")
+        self.campo_ruta.setPlaceholderText("D:/Ruta/a/tu/carpeta...")
         self.campo_ruta.setFixedHeight(44)
         self.campo_ruta.setStyleSheet(f"""
             QLineEdit {{
                 border: 1px solid {GRIS_BORDE};
-                border-radius: {RADIUS_MD};
+                border-radius: 10px;
                 background-color: {BLANCO};
                 padding-left: 14px;
-                color: #333;
+                color: {TEXTO};
                 font-size: 13px;
                 font-family: {FONT_FAMILY};
             }}
             QLineEdit:focus {{
-                border: 1px solid {DORADO};
+                border: 1.5px solid {ROJO};
             }}
         """)
-        
-        self.btn_browse = QPushButton("📁")
-        self.btn_browse.setFixedSize(44, 44)
-        self.btn_browse.setCursor(Qt.PointingHandCursor)
-        self.btn_browse.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {BLANCO};
-                border: 1px solid {GRIS_BORDE};
-                border-radius: {RADIUS_MD};
-                font-size: 16px;
-            }}
-            QPushButton:hover {{
-                border: 1px solid {DORADO};
-                background-color: rgba(255, 196, 0, 0.1);
-            }}
-        """)
+
+        self.btn_browse = crear_boton_icono(
+            "Examinar", "fa5s.folder-open",
+            color_fondo=ROJO, color_texto=BLANCO, color_hover=ROJO_HOVER, alto=44
+        )
         self.btn_browse.clicked.connect(self.browse_folder)
-        
-        layout_input_dir.addWidget(self.campo_ruta)
-        layout_input_dir.addWidget(self.btn_browse)
-        
-        layout_card_dir.addWidget(etiqueta_dir)
-        layout_card_dir.addLayout(layout_input_dir)
-        
-        # Sombra card_dir
-        shadow_dir = QGraphicsDropShadowEffect(self)
-        shadow_dir.setBlurRadius(15)
-        shadow_dir.setXOffset(0)
-        shadow_dir.setYOffset(4)
-        shadow_dir.setColor(QColor(0, 0, 0, 15))
-        card_dir.setGraphicsEffect(shadow_dir)
 
-        # Card: Período
-        card_periodo = QWidget()
-        card_periodo.setStyleSheet(f"""
-            QWidget {{
-                background-color: {GRIS_BG};
-                border-radius: {RADIUS_MD};
-            }}
-        """)
-        layout_card_per = QVBoxLayout(card_periodo)
-        layout_card_per.setContentsMargins(20, 20, 20, 20)
-        layout_card_per.setSpacing(12)
-        
-        etiqueta_periodo = QLabel("Período de análisis")
-        etiqueta_periodo.setStyleSheet(f"color: {OSCURO}; font-size: 13px; font-weight: 600; font-family: {FONT_FAMILY};")
+        fila.addWidget(self.campo_ruta)
+        fila.addWidget(self.btn_browse)
 
-        # Inyección de Menubars reutilizables
+        layout.addWidget(etiqueta)
+        layout.addLayout(fila)
+        return card
+
+    def _crear_card_periodo(self) -> QWidget:
+        card = self._crear_tarjeta_base()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+
+        etiqueta = crear_fila_icono_texto(
+            "fa5s.calendar-alt", "Periodo de análisis",
+            color_icono=TEXTO, color_texto=TEXTO
+        )
+
         anio_actual = str(datetime.datetime.now().year)
         self.combo_ano = crear_menubar("Año", self.datos_anos, default_val=anio_actual)
         self.combo_mes = crear_menubar("Mes", self.datos_meses)
 
-        layout_combos = QHBoxLayout()
-        layout_combos.addWidget(self.combo_ano)
-        layout_combos.addWidget(self.combo_mes)
-        layout_combos.setSpacing(19)
-        layout_combos.addStretch() # Empuja los combos a la izquierda
-        
-        layout_card_per.addWidget(etiqueta_periodo)
-        layout_card_per.addLayout(layout_combos)
-        
-        # Sombra card_periodo
-        shadow_per = QGraphicsDropShadowEffect(self)
-        shadow_per.setBlurRadius(15)
-        shadow_per.setXOffset(0)
-        shadow_per.setYOffset(4)
-        shadow_per.setColor(QColor(0, 0, 0, 15))
-        card_periodo.setGraphicsEffect(shadow_per)
+        # Sub-bloques con etiqueta propia (Año / Mes), como en el diseño
+        bloque_ano = QVBoxLayout()
+        bloque_ano.setSpacing(6)
+        lbl_ano = QLabel("Año")
+        lbl_ano.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 11px; font-family: {FONT_FAMILY};")
+        bloque_ano.addWidget(lbl_ano)
+        bloque_ano.addWidget(self.combo_ano)
 
-        # Botón Iniciar
-        self.boton_iniciar = QPushButton("INICIAR EXTRACCIÓN")
-        self.boton_iniciar.setFixedHeight(50)
-        self.boton_iniciar.setCursor(Qt.PointingHandCursor)
-        self.boton_iniciar.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DORADO};
-                color: {OSCURO};
-                border-radius: {RADIUS_MD};
-                font-size: 14px;
-                font-weight: 800;
-                font-family: {FONT_FAMILY};
-                letter-spacing: 1px;
-            }}
-            QPushButton:hover {{ 
-                background-color: {DORADO_HOVER}; 
-            }}
-            QPushButton:disabled {{ 
-                background-color: {GRIS_DESHABILITADO}; 
-                color: rgba(255,255,255,0.5);
-            }}
+        bloque_mes = QVBoxLayout()
+        bloque_mes.setSpacing(6)
+        lbl_mes = QLabel("Mes")
+        lbl_mes.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 11px; font-family: {FONT_FAMILY};")
+        bloque_mes.addWidget(lbl_mes)
+        bloque_mes.addWidget(self.combo_mes)
+
+        fila_combos = QHBoxLayout()
+        fila_combos.setSpacing(18)
+        fila_combos.addLayout(bloque_ano, 1)
+        fila_combos.addLayout(bloque_mes, 1)
+
+        layout.addWidget(etiqueta)
+        layout.addLayout(fila_combos)
+        return card
+
+    def _crear_progreso(self) -> QWidget:
+        self.progreso_widget = QWidget()
+        self.progreso_widget.setVisible(False)
+        layout = QVBoxLayout(self.progreso_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.lbl_progreso = QLabel("Preparando...")
+        self.lbl_progreso.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 12px; font-family: {FONT_FAMILY};")
+
+        self.barra_progreso = crear_barra_progreso()
+
+        layout.addWidget(self.lbl_progreso)
+        layout.addWidget(self.barra_progreso)
+        return self.progreso_widget
+
+    def _crear_boton_iniciar(self) -> QPushButton:
+        self.boton_iniciar = crear_boton_icono(
+            "INICIAR EXTRACCIÓN", "fa5s.bolt",
+            color_fondo=ROJO, color_texto=BLANCO, color_hover=ROJO_HOVER,
+            alto=52, radio=12, tam_icono=15
+        )
+        self.boton_iniciar.setStyleSheet(self.boton_iniciar.styleSheet() + f"""
+            QPushButton {{ font-size: 14px; font-weight: 800; letter-spacing: 1px;
+                           font-family: {FONT_FAMILY_TITLE}; }}
         """)
         self.boton_iniciar.clicked.connect(self.on_click_iniciar)
-        
-        # Sombra dorada para el botón
+
         shadow_btn = QGraphicsDropShadowEffect(self)
         shadow_btn.setBlurRadius(20)
         shadow_btn.setXOffset(0)
         shadow_btn.setYOffset(6)
-        shadow_btn.setColor(QColor(255, 196, 0, 60))
+        shadow_btn.setColor(QColor(200, 16, 46, 70))
         self.boton_iniciar.setGraphicsEffect(shadow_btn)
 
-        # Progreso
-        self.progreso_widget = QWidget()
-        self.progreso_widget.setVisible(False)
-        layout_progreso = QVBoxLayout(self.progreso_widget)
-        layout_progreso.setContentsMargins(0, 0, 0, 0)
-        layout_progreso.setSpacing(8)
-        
-        self.lbl_progreso = QLabel("Preparando...")
-        self.lbl_progreso.setStyleSheet(f"color: {GRIS_TEXTO}; font-size: 12px; font-family: {FONT_FAMILY};")
-        
-        self.barra_progreso = crear_barra_progreso()
-        
-        layout_progreso.addWidget(self.lbl_progreso)
-        layout_progreso.addWidget(self.barra_progreso)
+        return self.boton_iniciar
 
-        # Construcción del Layout Izquierdo
-        layout_izquierdo.addWidget(header_form)
-        layout_izquierdo.addWidget(card_dir)
-        layout_izquierdo.addWidget(card_periodo)
-        layout_izquierdo.addStretch()
-        layout_izquierdo.addWidget(self.progreso_widget)
-        layout_izquierdo.addWidget(self.boton_iniciar)
+    # ── PANEL DERECHO (Visual Hero) ───────────────────────────────
+    def _crear_panel_derecho(self) -> QWidget:
+        panel = QWidget()
+        panel.setFixedWidth(600)
+        panel.setObjectName("panel_derecho")
 
+        # Si existe una imagen de fondo (textura/globo), se usa como base;
+        # si no, se aplica un degradado rojo corporativo.
+        ruta_fondo = os.path.join(self.ruta_raiz, "src", "assets", "images", "fondo.png").replace("\\", "/")
 
-        # ── PANEL DERECHO (Visual Hero) ──────────────────────────────────
-        panel_derecho = QWidget()
-        panel_derecho.setFixedWidth(450)
-        panel_derecho.setObjectName("panel_derecho")
-        
-        path_fondo = os.path.join(self.ruta_raiz, "src", "assets", "images", "fondo.png").replace("\\", "/")
-        
-        
-        panel_derecho.setStyleSheet(f"""
-            QWidget#panel_derecho {{
-                border-image: url("{path_fondo}") 0 0 0 0 stretch stretch;
-                border-bottom-right-radius: {RADIUS_MD};
+        if os.path.exists(ruta_fondo):
+            panel.setStyleSheet(f"""
+                QWidget#panel_derecho {{
+                    border-image: url("{ruta_fondo}") 0 0 0 0 stretch stretch;
+                    border-bottom-right-radius: 12px;
+                }}
+            """)
+        else:
+            panel.setStyleSheet(f"""
+                QWidget#panel_derecho {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 {ROJO}, stop:1 {ROJO_OSCURO});
+                    border-bottom-right-radius: 12px;
+                }}
+            """)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(36, 40, 36, 32)
+        layout.setSpacing(0)
+
+        # Título
+        lbl_titulo = QLabel("SISTEMA DE\nEXTRACCIÓN ZEUS")
+        lbl_titulo.setStyleSheet(f"""
+            color: {TEXTO_SECUNDARIO};
+            font-size: 26px;
+            font-weight: 800;
+            font-family: {FONT_FAMILY_TITLE};
+            line-height: 120%;
+        """)
+        layout.addWidget(lbl_titulo)
+
+        lbl_subtitulo = QLabel("EXTRACCIÓN AVANZADA DE DATOS")
+        lbl_subtitulo.setStyleSheet(f"""
+            color: {ROJO_SUAVE};
+            font-size: 12px;
+            font-weight: 700;
+            font-family: {FONT_FAMILY};
+            letter-spacing: 1px;
+            margin-top: 8px;
+        """)
+        layout.addWidget(lbl_subtitulo)
+
+        linea = QFrame()
+        linea.setFixedSize(46, 3)
+        linea.setStyleSheet(f"background-color: {BLANCO}; border-radius: 1px; margin-top: 14px;")
+        layout.addWidget(linea)
+
+        lbl_desc = QLabel("Automatiza la extracción de información financiera\n y presupuestal desde el SISFONAFE.")
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet(f"""
+            color: {TEXTO_SECUNDARIO};
+            font-size: 13px;
+            font-family: {FONT_FAMILY};
+            letter-spacing: 1px;
+            margin-top: 14px;
+        """)
+        layout.addWidget(lbl_desc)
+
+        layout.addStretch()
+
+        layout.addWidget(self._crear_card_archivos())
+
+        return panel
+
+    def _crear_card_archivos(self) -> QWidget:
+        card = QWidget()
+        card.setStyleSheet(f"""
+            QWidget {{
+                background-color: {OVERLAY_OSCURO};
+                border: 1px solid {BORDE_OVERLAY};
+                border-radius: 14px;
             }}
         """)
-        
-        # Layout directamente en el panel derecho (sin overlay)
-        layout_derecho = QVBoxLayout(panel_derecho)
-        layout_derecho.setContentsMargins(40, 40, 40, 40)
-        
-        layout_derecho.addStretch()
 
-        # Ensamblado Final
-        layout_principal.addWidget(panel_izquierdo)
-        layout_principal.addWidget(panel_derecho)
-        
-        container_layout.addWidget(content_widget)
-        
-        self.setCentralWidget(self.main_container)
+        # La card solo ocupará el ancho necesario
+        card.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Preferred
+        )
 
-    # ── Métodos de Título y Movimiento ───────────────────────────────
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+
+        lbl_titulo = QLabel("Archivos a extraer")
+        lbl_titulo.setStyleSheet(f"""
+            color: {BLANCO};
+            font-size: 14px;
+            font-weight: 400;
+            font-family: {FONT_FAMILY_TITLE};
+        """)
+        lbl_titulo.setSizePolicy(
+            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Fixed
+        )
+        layout.addWidget(lbl_titulo)
+
+        items = [
+            "Estado de Situación Financiera",
+            "Estado de Resultados Integrales",
+            "Presupuesto de Ingresos y Egresos",
+            "Flujo de Caja",
+            "Gastos de Capital",
+            "Depósitos y Colocaciones",
+            "y otros reportes asociados",
+        ]
+
+        for texto in items:
+            item = crear_item_check(texto)
+            item.setSizePolicy(
+                QSizePolicy.Policy.Maximum,
+                QSizePolicy.Policy.Fixed
+            )
+            layout.addWidget(item)
+
+        layout.addStretch()
+
+        return card
+
+    # ── FOOTER ────────────────────────────────────────────────────
+    def _crear_footer(self) -> QWidget:
+        footer = QWidget()
+        footer.setFixedHeight(34)
+        footer.setStyleSheet(f"""
+            background-color: {GRIS_BG};
+            border-top: 1px solid {GRIS_BORDE};
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+        """)
+        layout = QHBoxLayout(footer)
+        layout.setContentsMargins(20, 0, 20, 0)
+
+        lbl = QLabel("Uso interno • Versión 1.0.0 • Área Corporativa de Presupuesto")
+        lbl.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 11px; font-family: {FONT_FAMILY};")
+        layout.addStretch()
+        layout.addWidget(lbl)
+        layout.addStretch()
+
+        return footer
+
+    # ══════════════════════════════════════════════════════════════
+    # Métodos de título / movimiento de ventana
+    # ══════════════════════════════════════════════════════════════
     def title_bar_mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -371,18 +567,27 @@ class MainWindow(QMainWindow):
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
 
+    def toggle_maximizar(self):
+        if self._is_maximized:
+            self.showNormal()
+        else:
+            self.showMaximized()
+        self._is_maximized = not self._is_maximized
+
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Directorio")
         if folder:
             self.campo_ruta.setText(folder)
 
-    # ── Métodos de Eventos ───────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # Métodos de eventos / lógica de negocio (sin cambios funcionales)
+    # ══════════════════════════════════════════════════════════════
     def on_click_iniciar(self):
         directorio = self.campo_ruta.text().strip()
         if not directorio:
             show_warning(self, "Advertencia", "Por favor selecciona un directorio de trabajo válido.")
             return
-            
+
         anio = self.combo_ano.currentText()
         mes_texto = self.combo_mes.currentText()
         mes = mes_texto.split(",")[0].strip()
@@ -390,14 +595,14 @@ class MainWindow(QMainWindow):
 
         # Modificación de UI estado de carga
         self.boton_iniciar.setEnabled(False)
-        self.boton_iniciar.setText("EJECUTANDO...")
+        self.boton_iniciar.setText("  EJECUTANDO...")
         self.campo_ruta.setEnabled(False)
         self.btn_browse.setEnabled(False)
         self.combo_ano.setEnabled(False)
         self.combo_mes.setEnabled(False)
-        
+
         self.progreso_widget.setVisible(True)
-        self.barra_progreso.setRange(0, 0) # Loading infinito
+        self.barra_progreso.setRange(0, 0)  # Loading infinito
 
         # Ejecutar scrapping en hilo de fondo
         self._worker = ScrappingWorker(directorio, anio, mes, fecha_cierre_sistema)
@@ -410,7 +615,7 @@ class MainWindow(QMainWindow):
 
     def _reset_ui_state(self):
         self.boton_iniciar.setEnabled(True)
-        self.boton_iniciar.setText("⚡ INICIAR EXTRACCIÓN")
+        self.boton_iniciar.setText("  INICIAR EXTRACCIÓN")
         self.campo_ruta.setEnabled(True)
         self.btn_browse.setEnabled(True)
         self.combo_ano.setEnabled(True)
@@ -438,15 +643,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Intercepta el cierre para terminar el worker si sigue activo."""
         if self._worker is not None and self._worker.isRunning():
-            # 1. Pedir al hilo que se detenga de forma cooperativa
             self._worker.requestInterruption()
-
-            # 2. Esperar hasta 10 segundos para que termine limpiamente (Excel necesita tiempo)
             terminado = self._worker.wait(10000)
 
             if not terminado:
-                # 3. Si no terminó, forzar la terminación del hilo
-                # Esto puede dejar Excel abierto, pero la UI queda cerrable.
                 print("[Advertencia] Worker no terminó a tiempo — forzando término.")
                 self._worker.terminate()
                 self._worker.wait(1000)

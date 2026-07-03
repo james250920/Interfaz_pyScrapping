@@ -1,58 +1,36 @@
-# Constantes de tema compartidas entre componentes de la UI
-# ─────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# THEME — Paleta de colores y tipografía corporativa (FONAFE)
+# ──────────────────────────────────────────────────────────────
 
-# ── Tipografía ──────────────────────────────────────────
-FONT_FAMILY = "'Segoe UI', 'Roboto', sans-serif"
-FONT_FAMILY_TITLE = "'Segoe UI Semibold', 'Segoe UI', sans-serif"
+# Tipografía
+FONT_FAMILY = "'Segoe UI'"
+FONT_FAMILY_TITLE = "'Segoe UI Semibold'"
 
-# ── Colores principales ────────────────────────────────
-OSCURO = "#0f0f1a"
-OSCURO_2 = "#161625"
-OSCURO_3 = "#1c1c30"
-OSCURO_CARD = "#1a1a2e"
+# ── Rojo corporativo (color principal de marca) ─────────────────
+ROJO = "#c8102e"
+ROJO_HOVER = "#a80d27"
+ROJO_OSCURO = "#7a0b1f"     # extremo oscuro del degradado del panel derecho
+ROJO_SUAVE = "#e94a5c"      # acentos/subtítulos sobre fondo oscuro
 
-AZUL = "#115b82"
-AZUL_PRIMARIO = "#0078d4"
-AZUL_HOVER = "#006abc"
-AZUL_ELECTRICO = "#3b82f6"
-AZUL_GLOW = "#60a5fa"
+# ── Estados ───────────────────────────────────────────────────
+VERDE_EXITO = "#28a745"
+AZUL_INFO = "#007bff"
+NARANJA_ADVERTENCIA = "#ff9800"
 
-# ── Dorados / Ámbar (tema Zeus) ────────────────────────
-DORADO = "#FFC400"
-DORADO_HOVER = "#FFD84D"
-DORADO_OSCURO = "#c49b00"
-AMBAR = "#f59e0b"
-AMBAR_SUAVE = "rgba(255, 196, 0, 0.12)"
-
-# ── Grises / fondos ───────────────────────────────────
-GRIS_BG = "#f5f5f7"
-GRIS_BG_2 = "#eaeaef"
-GRIS_BORDE = "#d4d4d8"
-GRIS_BORDE_HOVER = "#a1a1aa"
-GRIS_DESHABILITADO = "#6b7280"
-GRIS_TEXTO = "#71717a"
-GRIS_TEXTO_SUAVE = "rgba(0,0,0,0.45)"
-
+# ── Neutros ───────────────────────────────────────────────────
 BLANCO = "#ffffff"
-BLANCO_SUAVE = "rgba(255,255,255,0.92)"
+BLANCO_SUAVE = "#fafafa"
 
-# ── Estados ────────────────────────────────────────────
-VERDE_EXITO = "#10b981"
-ROJO_ERROR = "#ef4444"
-NARANJA_ADVERTENCIA = "#f59e0b"
-AZUL_INFO = "#3b82f6"
+GRIS_BG = "#f7f7f8"          # fondo de tarjetas / paneles claros
+GRIS_CARD = "#ffffff"
+GRIS_BORDE = "#e5e5e7"
+GRIS_BORDE_HOVER = "#d0d0d4"
 
-# ── Sombras y overlays ────────────────────────────────
-SOMBRA = "rgba(0, 0, 0, 0.15)"
-OVERLAY_OSCURO = "rgba(15, 15, 26, 0.65)"
+TEXTO = "#1a1a1a"             # texto principal (títulos)
+TEXTO_SECUNDARIO = "#6b7280"  # texto gris secundario
 
-# ── Gradientes (como strings CSS para stylesheet) ─────
-GRAD_BOTON_DORADO = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #FFC400, stop:1 #f59e0b)"
-GRAD_BOTON_DORADO_HOVER = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #FFD84D, stop:1 #FFC400)"
-GRAD_PANEL_OSCURO = "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0f0f1a, stop:1 #1a1a2e)"
+SOMBRA = "rgba(0,0,0,0.10)"
 
-# ── Radios de borde ───────────────────────────────────
-RADIUS_SM = "6px"
-RADIUS_MD = "10px"
-RADIUS_LG = "14px"
-RADIUS_XL = "18px"
+# ── Overlay para tarjetas sobre el panel oscuro (derecho) ───────
+OVERLAY_OSCURO = "rgba(0, 0, 0, 0.28)"
+BORDE_OVERLAY = "rgba(255, 255, 255, 0.12)"
