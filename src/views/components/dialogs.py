@@ -1,5 +1,5 @@
 import os
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
 
@@ -102,6 +102,28 @@ class StyledDialog(QDialog):
         container_layout.addLayout(btn_layout)
 
         layout.addWidget(self.container)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._centrar_dialogo()
+
+    def _centrar_dialogo(self):
+        destino = None
+
+        parent = self.parentWidget()
+        if parent is not None:
+            destino = parent.frameGeometry().center()
+        else:
+            pantalla = QApplication.primaryScreen()
+            if pantalla is not None:
+                destino = pantalla.availableGeometry().center()
+
+        if destino is None:
+            return
+
+        geometria = self.frameGeometry()
+        geometria.moveCenter(destino)
+        self.move(geometria.topLeft())
 
 
 def show_info(parent, title, message):

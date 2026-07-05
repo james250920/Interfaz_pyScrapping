@@ -1,242 +1,529 @@
-from src.scrapping.Python_procesos import Crear_Descargar_0, Cierre_periodo_1, Actualizar_marcos, limpiarDatos, copiar_pegar_form_ejecu
-from src.scrapping.Bases_Oficial import A_Actualizar_datos_iniciales as A, B_Copiar_Pegar_cierre_y_validacion as B, C_limpiza_GK as C , D_Crear_archivos_validacion_GK as D,E_Actualizar_Marcos as E,F_consolidar_Gastos_Capital_Flujo_de_caja as F, G_consolidar_Gastos_Capital_Presupuesto as G,H_Copiar_pegar_Validacion_GK_Flujo_Caja_Base_fonabe_FBK as H, I_Copiar_pegar_Validacion_GK_Presupuesto_Base_fonabe_FBK as I,J_desplegarFormula as J, K_cambiarFormato_llenarCeros as K,L_eliminar_Rango_Depositos_Colocaciones as L,M_Copiar_Pegar_Deposito_Colocaciones_Base as M, N_Formato_Depositos_Colocaciones_Bases as N
+from src.scrapping.Python_procesos import (
+    Crear_Descargar_0,
+    Cierre_periodo_1,
+    Actualizar_marcos,
+    limpiarDatos,
+    copiar_pegar_form_ejecu,
+)
+
+from src.scrapping.Bases_Oficial import (
+    A_Actualizar_datos_iniciales as A,
+    B_Copiar_Pegar_cierre_y_validacion as B,
+    C_limpiza_GK as C,
+    D_Crear_archivos_validacion_GK as D,
+    E_Actualizar_Marcos as E,
+    F_consolidar_Gastos_Capital_Flujo_de_caja as F,
+    G_consolidar_Gastos_Capital_Presupuesto as G,
+    H_Copiar_pegar_Validacion_GK_Flujo_Caja_Base_fonabe_FBK as H,
+    I_Copiar_pegar_Validacion_GK_Presupuesto_Base_fonabe_FBK as I,
+    J_desplegarFormula as J,
+    K_cambiarFormato_llenarCeros as K,
+    L_eliminar_Rango_Depositos_Colocaciones as L,
+    M_Copiar_Pegar_Deposito_Colocaciones_Base as M,
+    N_Formato_Depositos_Colocaciones_Bases as N,
+)
+
 from src.scrapping.EVA_Oficial import A_eva
+
 import time
 import os
 import shutil
 import datetime
 import re
+import inspect
+from pathlib import Path
 import asyncio
-import sys
 
 
-def eliminar_procesos_excel(forzar=False):
-    if not forzar:
-        return
-    try:
-        comando = "taskkill /f /im excel.exe"
-        resultado = os.system(comando)
-        if resultado == 0:
-            print("Todos los procesos de Excel fueron eliminados (fallback).")
-        else:
-            print("No se encontraron procesos de Excel activos o no se pudieron cerrar.")
-    except Exception as e:
-        print(f"Ocurrió un error al intentar cerrar Excel: {e}")
+# ══════════════════════════════════════════════════════════════
+# FUNCIONES EXISTENTES
+# ══════════════════════════════════════════════════════════════
 
 
 def formato_name_plantillas(ruta_principal, mes):
+    ruta_base = Path(ruta_principal).expanduser().resolve()
+
     meses_texto = {
-        1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
-        5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
-        9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+        1: "enero",
+        2: "febrero",
+        3: "marzo",
+        4: "abril",
+        5: "mayo",
+        6: "junio",
+        7: "julio",
+        8: "agosto",
+        9: "septiembre",
+        10: "octubre",
+        11: "noviembre",
+        12: "diciembre",
     }
+
     try:
         mes_valido = meses_texto[int(mes)]
-    except (ValueError, KeyError):
+    except (ValueError, KeyError, TypeError):
         mes_valido = str(mes).lower()
 
     fecha_ejecucion = datetime.datetime.now().strftime("%d.%m.%Y")
     patron_fecha_final = r"\s\d{2}\.\d{2}\.\d{4}$"
     carpetas_excluidas = {"logs"}
 
-    if not os.path.exists(ruta_principal):
+    if not ruta_base.exists():
+        print(f"Aviso: no existe la ruta principal: {ruta_base}", flush=True)
         return
 
-    for elemento in os.listdir(ruta_principal):
-        ruta_completa = os.path.join(ruta_principal, elemento)
-        
-        if os.path.isdir(ruta_completa):
+    if not ruta_base.is_dir():
+        print(f"Aviso: la ruta principal no es una carpeta válida: {ruta_base}", flush=True)
+        return
+
+    for elemento in sorted(os.listdir(ruta_base)):
+        ruta_completa = ruta_base / elemento
+
+        if ruta_completa.is_dir():
             if elemento.lower() in carpetas_excluidas:
                 continue
 
             if re.search(patron_fecha_final, elemento):
                 continue
-                
+
             nuevo_nombre = f"{elemento} {fecha_ejecucion}"
+            nueva_ruta = ruta_base / nuevo_nombre
+
+            if nueva_ruta.exists():
+                print(
+                    f"Aviso: no se renombra '{elemento}' porque ya existe '{nuevo_nombre}'",
+                    flush=True,
+                )
+                continue
+
             try:
-                os.rename(ruta_completa, os.path.join(ruta_principal, nuevo_nombre))
+                os.rename(str(ruta_completa), str(nueva_ruta))
             except PermissionError as e:
-                print(f"Aviso: no se pudo renombrar la carpeta '{elemento}': {e}")
-            
-        elif os.path.isfile(ruta_completa):
+                print(f"Aviso: no se pudo renombrar la carpeta '{elemento}': {e}", flush=True)
+            except OSError as e:
+                print(f"Aviso: error renombrando carpeta '{elemento}': {e}", flush=True)
+
+        elif ruta_completa.is_file():
             nombre_base, extension = os.path.splitext(elemento)
-            
+
             if re.search(patron_fecha_final, nombre_base):
                 continue
-                
+
             nuevo_nombre = f"{nombre_base} de {mes_valido} {fecha_ejecucion}{extension}"
+            nueva_ruta = ruta_base / nuevo_nombre
+
+            if nueva_ruta.exists():
+                print(
+                    f"Aviso: no se renombra '{elemento}' porque ya existe '{nuevo_nombre}'",
+                    flush=True,
+                )
+                continue
+
             try:
-                os.rename(ruta_completa, os.path.join(ruta_principal, nuevo_nombre))
+                os.rename(str(ruta_completa), str(nueva_ruta))
             except PermissionError as e:
-                print(f"Aviso: no se pudo renombrar el archivo '{elemento}': {e}")
+                print(f"Aviso: no se pudo renombrar el archivo '{elemento}': {e}", flush=True)
+            except OSError as e:
+                print(f"Aviso: error renombrando archivo '{elemento}': {e}", flush=True)
 
 
 def copiarPlantillas(ruta_principal):
-    # Ruta configurable: variable de entorno RUTA_PLANTILLAS o valor por defecto
-    carpeta_origen = os.environ.get("RUTA_PLANTILLAS", r"Z:\Data_extraction\Plantillas")
-    carpeta_destino = ruta_principal
-    # Asegúrate de que la carpeta de destino exista, si no, la crea
-    os.makedirs(carpeta_destino, exist_ok=True)
+    carpeta_origen = Path(
+        os.environ.get(
+            "RUTA_PLANTILLAS",
+            r"C:\Users\james\OneDrive\Escritorio\plantilla",
+        )
+    ).expanduser().resolve()
 
-    # Listar y copiar los archivos
-    for nombre_archivo in os.listdir(carpeta_origen):
-        ruta_completa_origen = os.path.join(carpeta_origen, nombre_archivo)
-        
-        # Comprobamos que sea un archivo y no una subcarpeta
-        if os.path.isfile(ruta_completa_origen):
-            shutil.copy2(ruta_completa_origen, carpeta_destino)
-            print(f"Copiado: {nombre_archivo}")
+    carpeta_destino = Path(ruta_principal).expanduser().resolve()
 
-    print("¡Proceso de copia finalizado!")
+    if not carpeta_origen.exists():
+        raise FileNotFoundError(f"No existe la carpeta de plantillas: {carpeta_origen}")
+
+    if not carpeta_origen.is_dir():
+        raise NotADirectoryError(f"La ruta de plantillas no es una carpeta: {carpeta_origen}")
+
+    carpeta_destino.mkdir(parents=True, exist_ok=True)
+
+    for nombre_archivo in sorted(os.listdir(carpeta_origen)):
+        ruta_completa_origen = carpeta_origen / nombre_archivo
+
+        if not ruta_completa_origen.is_file():
+            continue
+
+        destino_final = carpeta_destino / nombre_archivo
+        destino_temporal = carpeta_destino / f".{nombre_archivo}.tmp"
+
+        try:
+            shutil.copy2(str(ruta_completa_origen), str(destino_temporal))
+            os.replace(str(destino_temporal), str(destino_final))
+            print(f"Copiado: {nombre_archivo}", flush=True)
+
+        finally:
+            try:
+                if destino_temporal.exists():
+                    destino_temporal.unlink()
+            except OSError as e:
+                print(f"Aviso: no se pudo eliminar temporal '{destino_temporal}': {e}", flush=True)
+
+    print("¡Proceso de copia finalizado!", flush=True)
+
+
+def _validar_resultado_no_async(nombre, resultado):
+    """
+    Evita que el pipeline continúe si una función que debe ser síncrona
+    todavía devuelve una corrutina.
+    """
+
+    if inspect.isawaitable(resultado):
+        try:
+            if hasattr(resultado, "close"):
+                resultado.close()
+        except Exception:
+            pass
+
+        raise TypeError(
+            f"[{nombre}] devolvió una corrutina/awaitable. "
+            "Solo Crear_Descargar_0.crear_descargar puede ser async. "
+            "Convierte esta función a síncrona antes de llamarla desde el pipeline."
+        )
 
 
 def ejecutar_con_tiempo(nombre, funcion, *args, **kwargs):
     inicio = time.perf_counter()
-    print(f"[{nombre}] iniciando...")
+    print(f"[{nombre}] iniciando...", flush=True)
+
     resultado = funcion(*args, **kwargs)
+    _validar_resultado_no_async(nombre, resultado)
+
     duracion = time.perf_counter() - inicio
-    print(f"[{nombre}] finalizado en {duracion:.2f} segundos.")
+    print(f"[{nombre}] finalizado en {duracion:.2f} segundos.", flush=True)
+
+    if resultado is False:
+        raise RuntimeError(f"[{nombre}] finalizó con resultado False")
+
     return resultado
 
 
-async def _pipeline_async(ruta_principal, anio, mes, fecha_cierre_sistema, reportar, check_cancel):
-    """Coordinador async principal — un solo event loop para todo el pipeline."""
-    loop = asyncio.get_running_loop()
-
-    def verificar_cancelacion():
-        if check_cancel and check_cancel():
-            raise Exception("Proceso cancelado por el usuario")
-
-    # ═══ Fase 1: Python_procesos ═══════════════════════════════════════════
-    verificar_cancelacion()
-    reportar("Descargando datos...")
-    await Crear_Descargar_0.crear_descargar(ruta_principal, anio, mes)
-
-    verificar_cancelacion()
-    reportar("Actualizando marcos...")
-    await Actualizar_marcos.actualizar_marco(ruta_principal, max_workers=16)
-
-    verificar_cancelacion()
-    reportar("Limpiando datos...")
-    await limpiarDatos.limpiar_datos(ruta_principal, mes)
-    await asyncio.sleep(2)
-
-    verificar_cancelacion()
-    reportar("Cierre...")
-    await Cierre_periodo_1.cierre_periodo(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Copiando formulación/ejecución...")
-    await copiar_pegar_form_ejecu.copiar_pegar_form_ejecu(ruta_principal)
-    print("Proceso Python_procesos finalizado")
-
-    # ═══ Fase 2: Bases_Oficial ══════════════════════════════════════════════
-    verificar_cancelacion()
-    reportar("Actualizando datos iniciales...")
-    await A.actualizar_datos_iniciales(ruta_principal, anio, mes, fecha_cierre_sistema)
-
-    verificar_cancelacion()
-    reportar("Copiando cierre y validación...")
-    await B.copiar_pegar_cierre_y_validacion(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Limpiando hojas Excel...")
-    await C.limpiar_hojas_excel(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Creando archivos validación GK...")
-    await loop.run_in_executor(None, D.crear_archivos_validacion, ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Actualizando gastos de capital...")
-    await E.actualizar_gastos_capital(ruta_principal, max_workers=16)
-
-    verificar_cancelacion()
-    reportar("Consolidando GK flujo caja...")
-    await F.consolidar_gk_flujo_caja(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Consolidando GK presupuesto...")
-    await G.consolidar_gk_presupuesto(ruta_principal)
-    
-
-    verificar_cancelacion()
-    reportar("Validación Flujo de Caja...")
-    await H.copiar_pegar_validacion_Flujo_Caja(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Validación Presupuesto...")
-    await I.copiar_pegar_validacion_presupuesto(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Desplegando fórmulas...")
-    await J.desplegar_formulas(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Cambiando formato...")
-    await K.cambiar_formato(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Limpiando depósitos/colocaciones...")
-    await L.limpiar_hojas_excel(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Copiando depósitos/colocaciones...")
-    await M.copiar_pegar_deposiciones_colocaciones(ruta_principal)
-
-    verificar_cancelacion()
-    reportar("Formato depósitos/colocaciones...")
-    await N.formato_deposiciones_colocaciones(ruta_principal)
-
-    print("BASE finalizado")
-
-    # ═══ Fase 3: EVA_Oficial ════════════════════════════════════════════════
-    verificar_cancelacion()
-    # Se eliminan los taskkill por regla
-    reportar("EVA: Copiar y pegar...")
-    await A_eva.copiar_pegar(ruta_principal, anio, mes)
-
-
-
-def scrapping_main(ruta_principal, anio, mes, fecha_cierre_sistema, on_progreso=None, check_cancel=None):
-    """Orquestador principal del proceso de scrapping.
-
-    Args:
-        ruta_principal: Directorio de trabajo donde se procesan los archivos.
-        anio: Año del período a procesar (ej: "2026").
-        mes: Número de mes del período (ej: "5").
-        fecha_cierre_sistema: Fecha de cierre formateada (ej: "01.07.2026").
-        on_progreso: Callback opcional que recibe un str con el mensaje de avance.
-        check_cancel: Callback para verificar si se solicitó la cancelación de UI.
+async def _ejecutar_crear_descargar_async(ruta_principal, anio, mes):
     """
-    def reportar(msg):
-        print(f"[Progreso] {msg}")
-        if on_progreso:
-            on_progreso(msg)
+    Único punto async permitido.
+    """
 
-    reportar("Iniciando proceso...")
-    # Solo en caso extremo se limpia al inicio si se fuerza, pero omitimos por defecto
-    eliminar_procesos_excel(forzar=False)
+    resultado = Crear_Descargar_0.crear_descargar(ruta_principal, anio, mes)
 
-    reportar("Copiando plantillas...")
-    ejecutar_con_tiempo("copiarPlantillas", copiarPlantillas, ruta_principal)
+    if inspect.isawaitable(resultado):
+        resultado = await resultado
 
-    # Un solo event loop para todas las operaciones asíncronas
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    if resultado is False:
+        raise RuntimeError("[Crear_Descargar_0.crear_descargar] finalizó con resultado False")
 
-    try:
-        asyncio.run(_pipeline_async(ruta_principal, anio, mes, fecha_cierre_sistema, reportar, check_cancel))
-    except Exception as e:
-        if "Proceso cancelado" in str(e):
-            reportar("Proceso cancelado de forma segura.")
-            raise
-        else:
-            raise
+    return resultado
 
+
+def ejecutar_crear_descargar_con_tiempo(ruta_principal, anio, mes):
+    """
+    Ejecuta únicamente Crear_Descargar_0.crear_descargar con asyncio.run().
+    No introduce paralelismo.
+    """
+
+    inicio = time.perf_counter()
+    nombre = "Crear_Descargar_0.crear_descargar"
+
+    print(f"[{nombre}] iniciando...", flush=True)
+
+    resultado = asyncio.run(
+        _ejecutar_crear_descargar_async(ruta_principal, anio, mes)
+    )
+
+    duracion = time.perf_counter() - inicio
+    print(f"[{nombre}] finalizado en {duracion:.2f} segundos.", flush=True)
+
+    return resultado
+
+
+def _verificar_cancelacion(check_cancel):
     if check_cancel and check_cancel():
         raise Exception("Proceso cancelado por el usuario")
 
-    reportar("Renombrando archivos y carpetas...")
-    formato_name_plantillas(ruta_principal, mes)
-    print("Proceso finalizado")
+
+def _pipeline_sync(
+    ruta_principal,
+    anio,
+    mes,
+    fecha_cierre_sistema,
+    reportar,
+    check_cancel,
+):
+    """
+    Coordinador principal estrictamente secuencial.
+
+    Regla:
+    - Crear_Descargar_0.crear_descargar puede ser async.
+    - Todo lo demás debe ser síncrono.
+    """
+
+    _verificar_cancelacion(check_cancel)
+    reportar("Descargando datos...")
+    ejecutar_crear_descargar_con_tiempo(
+        ruta_principal,
+        anio,
+        mes,
+    )
+
+    _verificar_cancelacion(check_cancel)
+    reportar("Actualizando marcos...")
+    ejecutar_con_tiempo(
+        "Actualizar_marcos.actualizar_marco",
+        Actualizar_marcos.actualizar_marco,
+        ruta_principal,
+    )
+
+    _verificar_cancelacion(check_cancel)
+    reportar("Limpiando datos...")
+    ejecutar_con_tiempo(
+        "limpiarDatos.limpiar_datos",
+        limpiarDatos.limpiar_datos,
+        ruta_principal,
+        mes,
+    )
+
+    time.sleep(2)
+
+    _verificar_cancelacion(check_cancel)
+    reportar("Cierre...")
+    ejecutar_con_tiempo(
+        "Cierre_periodo_1.cierre_periodo",
+        Cierre_periodo_1.cierre_periodo,
+        ruta_principal,
+    )
+
+    _verificar_cancelacion(check_cancel)
+    reportar("Copiando formulación/ejecución...")
+    ejecutar_con_tiempo(
+        "copiar_pegar_form_ejecu.copiar_pegar_form_ejecu",
+        copiar_pegar_form_ejecu.copiar_pegar_form_ejecu,
+        ruta_principal,
+    )
+
+    print("Proceso Python_procesos finalizado", flush=True)
+# ═══ Fase 2: Bases_Oficia**═════════════════════════════════**═══════════
+
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Actualizando datos iniciales...")
+    # ejecutar_con_tiempo(
+    #     "A.actualizar_datos_iniciales",
+    #     A.actualizar_datos_iniciales,
+    #     ruta_principal,
+    #     anio,
+    #     mes,
+    #     fecha_cierre_sistema,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Copiando cierre y validación...")
+    # ejecutar_con_tiempo(
+    #     "B.copiar_pegar_cierre_y_validacion",
+    #     B.copiar_pegar_cierre_y_validacion,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Limpiando hojas Excel...")
+    # ejecutar_con_tiempo(
+    #     "C.limpiar_hojas_excel",
+    #     C.limpiar_hojas_excel,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Creando archivos validación GK...")
+    # ejecutar_con_tiempo(
+    #     "D.crear_archivos_validacion",
+    #     D.crear_archivos_validacion,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Actualizando gastos de capital...")
+    # ejecutar_con_tiempo(
+    #     "E.actualizar_gastos_capital",
+    #     E.actualizar_gastos_capital,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Consolidando GK flujo caja...")
+    # ejecutar_con_tiempo(
+    #     "F.consolidar_gk_flujo_caja",
+    #     F.consolidar_gk_flujo_caja,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Consolidando GK presupuesto...")
+    # ejecutar_con_tiempo(
+    #     "G.consolidar_gk_presupuesto",
+    #     G.consolidar_gk_presupuesto,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Validación Flujo de Caja...")
+    # ejecutar_con_tiempo(
+    #     "H.copiar_pegar_validacion_Flujo_Caja",
+    #     H.copiar_pegar_validacion_Flujo_Caja,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Validación Presupuesto...")
+    # ejecutar_con_tiempo(
+    #     "I.copiar_pegar_validacion_presupuesto",
+    #     I.copiar_pegar_validacion_presupuesto,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Desplegando fórmulas...")
+    # ejecutar_con_tiempo(
+    #     "J.desplegar_formulas",
+    #     J.desplegar_formulas,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Cambiando formato...")
+    # ejecutar_con_tiempo(
+    #     "K.cambiar_formato",
+    #     K.cambiar_formato,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Limpiando depósitos/colocaciones...")
+    # ejecutar_con_tiempo(
+    #     "L.limpiar_hojas_excel",
+    #     L.limpiar_hojas_excel,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Copiando depósitos/colocaciones...")
+    # ejecutar_con_tiempo(
+    #     "M.copiar_pegar_deposiciones_colocaciones",
+    #     M.copiar_pegar_deposiciones_colocaciones,
+    #     ruta_principal,
+    # )
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("Formato depósitos/colocaciones...")
+    # ejecutar_con_tiempo(
+    #     "N.formato_deposiciones_colocaciones",
+    #     N.formato_deposiciones_colocaciones,
+    #     ruta_principal,
+    # )
+
+    # print("BASE finalizado")
+
+    # ═══ Fase 3: EVA_Oficial ════════════════════════════════════════════════
+
+    # _verificar_cancelacion(check_cancel)
+    # reportar("EVA: Copiar y pegar...")
+    # ejecutar_con_tiempo(
+    #     "A_eva.copiar_pegar",
+    #     A_eva.copiar_pegar,
+    #     ruta_principal,
+    #     anio,
+    #     mes,
+    # )
+
+def scrapping_main(
+    ruta_principal,
+    anio,
+    mes,
+    fecha_cierre_sistema,
+    on_progreso=None,
+    check_cancel=None,
+):
+    """
+    Orquestador principal.
+
+    Ejecución:
+    - Secuencial.
+    - async solo para Crear_Descargar_0.crear_descargar.
+    - Sin ThreadPoolExecutor.
+    - Sin run_in_executor.
+    - Sin paralelismo sobre Excel ni archivos.
+
+    Al finalizar:
+    - Mata forzosamente el proceso principal del worker.
+    """
+
+    ruta_base = Path(ruta_principal).expanduser().resolve()
+
+    def reportar(msg):
+        print(f"[Progreso] {msg}", flush=True)
+
+        if on_progreso:
+            on_progreso(msg)
+
+    try:
+        if not ruta_base.exists():
+            raise FileNotFoundError(f"No existe la ruta principal: {ruta_base}")
+
+        if not ruta_base.is_dir():
+            raise NotADirectoryError(
+                f"La ruta principal no es una carpeta válida: {ruta_base}"
+            )
+
+        reportar("Iniciando proceso...")
+
+        _verificar_cancelacion(check_cancel)
+        reportar("Copiando plantillas...")
+        ejecutar_con_tiempo(
+            "copiarPlantillas",
+            copiarPlantillas,
+            str(ruta_base),
+        )
+
+        try:
+            _pipeline_sync(
+                str(ruta_base),
+                anio,
+                mes,
+                fecha_cierre_sistema,
+                reportar,
+                check_cancel,
+            )
+
+        except Exception as e:
+            if "Proceso cancelado" in str(e):
+                reportar("Proceso cancelado de forma segura.")
+                print(f"ERROR::{e}", flush=True)
+                return
+
+            reportar(f"Proceso detenido por error: {e}")
+            print(f"ERROR::{e}", flush=True)
+            return
+
+        _verificar_cancelacion(check_cancel)
+
+        reportar("Renombrando archivos y carpetas...")
+        ejecutar_con_tiempo(
+            "formato_name_plantillas",
+            formato_name_plantillas,
+            str(ruta_base),
+            mes,
+        )
+
+        reportar("Proceso finalizado")
+        print("Proceso finalizado", flush=True)
+        print("DONE::Proceso finalizado correctamente", flush=True)
+
+        return
+
+    except Exception as e:
+        reportar(f"Proceso detenido por error: {e}")
+        print(f"ERROR::{e}", flush=True)
+        return

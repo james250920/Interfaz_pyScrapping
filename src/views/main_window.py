@@ -1,69 +1,72 @@
 import os
+import sys
+import json
+import base64
 import datetime
-from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QLineEdit,
-                             QPushButton, QHBoxLayout, QVBoxLayout, QFileDialog,
-                             QGraphicsDropShadowEffect, QFrame,QSizePolicy)
-from PySide6.QtCore import Qt, QThread, Signal, QSize,QTimer  
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QWidget,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QHBoxLayout,
+    QVBoxLayout,
+    QFileDialog,
+    QGraphicsDropShadowEffect,
+    QFrame,
+    QSizePolicy,
+)
+from PySide6.QtCore import Qt, QProcess, QProcessEnvironment
 from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
-# Importamos componentes, modelos y tema centralizado
 from src.views.components.widgets_personalizados import (
-    crear_menubar, crear_imagen, crear_barra_progreso, crear_item_check,
-    crear_fila_icono_texto, crear_boton_icono, BotonIconoHover,
+    crear_menubar,
+    crear_barra_progreso,
+    crear_item_check,
+    crear_fila_icono_texto,
+    crear_boton_icono,
+    BotonIconoHover,
 )
-from src.views.components.dialogs import show_success, show_error, show_warning, show_info
+from src.views.components.dialogs import (
+    show_success,
+    show_error,
+    show_warning,
+)
 from src.views.theme import *
 from src.models.database import obtener_datos_periodo
-from src.scrapping.scrapping_main import scrapping_main, eliminar_procesos_excel
 
-
-class ScrappingWorker(QThread):
-    """Hilo de fondo para ejecutar el scrapping sin congelar la UI."""
-    finished = Signal()
-    error = Signal(str)
-    progress = Signal(str)
-
-    def __init__(self, directorio, anio, mes, fecha_cierre):
-        super().__init__()
-        self.directorio = directorio
-        self.anio = anio
-        self.mes = mes
-        self.fecha_cierre = fecha_cierre
-
-    def run(self):
-        try:
-            scrapping_main(
-                self.directorio, self.anio, self.mes, self.fecha_cierre,
-                on_progreso=self.progress.emit,
-                check_cancel=self.isInterruptionRequested
-            )
-        except Exception as e:
-            self.error.emit(str(e))
-        finally:
-            self.finished.emit()
 
 class MainWindow(QMainWindow):
     def __init__(self, ruta_raiz):
         super().__init__()
-        self.ruta_raiz = ruta_raiz  # Guardamos la ruta del proyecto
-        self._worker = None  # Referencia al hilo de scrapping
+        self.ruta_raiz = ruta_raiz
+
+        self._process = None
+        self._cerrando = False
+        self._ultimo_error_proceso = None
+        self._process_stdout_buffer = ""
+        self._proceso_marco_done = False
+        self._success_mostrado = False
+
         self.setWindowTitle("Zeus Excels - Sistema de Extracción")
         self.setFixedSize(1120, 640)
 
-        # Eliminar barra de título nativa y hacer esquinas redondeadas
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
-        # Variables para mover la ventana custom
         self._drag_pos = None
         self._is_maximized = False
 
-        # Configurar el icono de la ventana
-        ruta_icono = os.path.join(self.ruta_raiz, "src", "assets", "icons", "icon.svg")
+        ruta_icono = os.path.join(
+            self.ruta_raiz,
+            "src",
+            "assets",
+            "icons",
+            "icon.svg",
+        )
         self.setWindowIcon(QIcon(ruta_icono))
 
-        # Carga de datos usando el modelo
         self.datos_anos = obtener_datos_periodo("anios")
         self.datos_meses = obtener_datos_periodo("meses")
 
@@ -72,8 +75,8 @@ class MainWindow(QMainWindow):
     # ══════════════════════════════════════════════════════════════
     # CONSTRUCCIÓN DE LA UI
     # ══════════════════════════════════════════════════════════════
+
     def init_ui(self):
-        # Contenedor principal para poder aplicar border-radius a toda la ventana
         self.main_container = QWidget(self)
         self.main_container.setObjectName("MainContainer")
         self.main_container.setStyleSheet(f"""
@@ -90,7 +93,6 @@ class MainWindow(QMainWindow):
 
         container_layout.addWidget(self._crear_title_bar())
 
-        # ── CONTENIDO PRINCIPAL (Paneles Izquierdo y Derecho) ────────
         content_widget = QWidget()
         layout_principal = QHBoxLayout(content_widget)
         layout_principal.setContentsMargins(0, 0, 0, 0)
@@ -105,6 +107,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.main_container)
 
     # ── TITLE BAR ─────────────────────────────────────────────────
+
     def _crear_title_bar(self) -> QWidget:
         title_bar = QWidget()
         title_bar.setFixedHeight(48)
@@ -116,21 +119,33 @@ class MainWindow(QMainWindow):
                 border-bottom: 1px solid {GRIS_BORDE};
             }}
         """)
+
         title_layout = QHBoxLayout(title_bar)
         title_layout.setContentsMargins(20, 0, 12, 0)
         title_layout.setSpacing(10)
 
-        # Eventos para mover la ventana desde la barra de título
         title_bar.mousePressEvent = self.title_bar_mousePressEvent
         title_bar.mouseMoveEvent = self.title_bar_mouseMoveEvent
         title_bar.mouseDoubleClickEvent = lambda e: self.toggle_maximizar()
 
-        # Icono pequeño (mismo icono de la app, ej. SVG de marca)
         icono_lbl = QLabel()
-        ruta_icono = os.path.join(self.ruta_raiz, "src", "assets", "icons", "icon.svg")
+        ruta_icono = os.path.join(
+            self.ruta_raiz,
+            "src",
+            "assets",
+            "icons",
+            "icon.svg",
+        )
+
         if os.path.exists(ruta_icono):
-            pixmap = QPixmap(ruta_icono).scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pixmap = QPixmap(ruta_icono).scaled(
+                18,
+                18,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
             icono_lbl.setPixmap(pixmap)
+
         title_layout.addWidget(icono_lbl)
 
         app_title = QLabel("SISTEMA DE EXTRACCIÓN ZEUS")
@@ -144,20 +159,29 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(app_title)
         title_layout.addStretch()
 
-        # Botones de ventana (min / max / close) — íconos Font Awesome,
-        # cambian de color al pasar el mouse (ver BotonIconoHover)
         btn_min = BotonIconoHover(
-            "fa5s.window-minimize", TEXTO_SECUNDARIO, TEXTO, "rgba(0,0,0,0.06)"
+            "fa5s.window-minimize",
+            TEXTO_SECUNDARIO,
+            TEXTO,
+            "rgba(0,0,0,0.06)",
         )
         btn_min.clicked.connect(self.showMinimized)
 
         btn_max = BotonIconoHover(
-            "fa5s.window-maximize", TEXTO_SECUNDARIO, TEXTO, "rgba(0,0,0,0.06)", tam_icono=10
+            "fa5s.window-maximize",
+            TEXTO_SECUNDARIO,
+            TEXTO,
+            "rgba(0,0,0,0.06)",
+            tam_icono=10,
         )
         btn_max.clicked.connect(self.toggle_maximizar)
 
         btn_close = BotonIconoHover(
-            "fa5s.times", TEXTO_SECUNDARIO, BLANCO, "#ef4444", tam_icono=13
+            "fa5s.times",
+            TEXTO_SECUNDARIO,
+            BLANCO,
+            "#ef4444",
+            tam_icono=13,
         )
         btn_close.clicked.connect(self.close)
 
@@ -167,10 +191,12 @@ class MainWindow(QMainWindow):
 
         return title_bar
 
-    # ── PANEL IZQUIERDO (Formulario) ─────────────────────────────
+    # ── PANEL IZQUIERDO ───────────────────────────────────────────
+
     def _crear_panel_izquierdo(self) -> QWidget:
         panel = QWidget()
         panel.setStyleSheet(f"background-color: {BLANCO};")
+
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(48, 36, 48, 12)
         layout.setSpacing(10)
@@ -186,17 +212,20 @@ class MainWindow(QMainWindow):
         return panel
 
     def _crear_logo(self) -> QWidget:
-        """Logo institucional. Se carga desde un único SVG
-        (logo_fonafe.svg) que ya trae integrados el ícono y el texto
-        'CORPORACIÓN FONAFE' — no se arma con labels sueltos."""
         cont = QWidget()
         row = QHBoxLayout(cont)
         row.setContentsMargins(0, 0, 0, 0)
 
         lbl_logo = QLabel()
-        alto_logo = 80 # alto objetivo del logo dentro del panel
+        alto_logo = 80
 
-        ruta_svg = os.path.join(self.ruta_raiz, "src", "assets", "images", "logo_fonafe.svg")
+        ruta_svg = os.path.join(
+            self.ruta_raiz,
+            "src",
+            "assets",
+            "images",
+            "logo_fonafe.svg",
+        )
 
         if os.path.exists(ruta_svg):
             renderer = QSvgRenderer(ruta_svg)
@@ -207,22 +236,20 @@ class MainWindow(QMainWindow):
             else:
                 ancho_logo = 160
 
-            # Se renderiza a 2x y se marca el devicePixelRatio para que
-            # el SVG se vea nítido en pantallas HiDPI (evita el
-            # pixelado que da usar QPixmap(path).scaled() directamente).
             escala = 3
             pixmap = QPixmap(ancho_logo * escala, alto_logo * escala)
             pixmap.fill(Qt.transparent)
+
             painter = QPainter(pixmap)
             renderer.render(painter)
             painter.end()
+
             pixmap.setDevicePixelRatio(escala)
 
             lbl_logo.setPixmap(pixmap)
             lbl_logo.setFixedSize(ancho_logo, alto_logo)
+
         else:
-            # Fallback de texto si el SVG no está presente, para no
-            # romper la ventana mientras se agrega el asset definitivo.
             lbl_logo.setText("CORPORACIÓN FONAFE")
             lbl_logo.setStyleSheet(f"""
                 color: {ROJO};
@@ -233,6 +260,7 @@ class MainWindow(QMainWindow):
 
         row.addWidget(lbl_logo)
         row.addStretch()
+
         return cont
 
     def _crear_header_formulario(self) -> QWidget:
@@ -251,9 +279,14 @@ class MainWindow(QMainWindow):
 
         linea = QFrame()
         linea.setFixedSize(46, 4)
-        linea.setStyleSheet(f"background-color: {ROJO}; border-radius: 2px;")
+        linea.setStyleSheet(f"""
+            background-color: {ROJO};
+            border-radius: 2px;
+        """)
 
-        lbl_subtitulo = QLabel("Especifica los parámetros para iniciar la extracción de información.")
+        lbl_subtitulo = QLabel(
+            "Especifica los parámetros para iniciar la extracción de información."
+        )
         lbl_subtitulo.setWordWrap(True)
         lbl_subtitulo.setStyleSheet(f"""
             color: {TEXTO_SECUNDARIO};
@@ -264,10 +297,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(lbl_titulo)
         layout.addWidget(linea)
         layout.addWidget(lbl_subtitulo)
+
         return header
 
     def _crear_tarjeta_base(self) -> QWidget:
-        """Tarjeta gris clara reutilizable con sombra suave."""
         card = QWidget()
         card.setStyleSheet(f"""
             QWidget {{
@@ -275,23 +308,29 @@ class MainWindow(QMainWindow):
                 border-radius: 14px;
             }}
         """)
+
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(15)
         shadow.setXOffset(0)
         shadow.setYOffset(4)
         shadow.setColor(QColor(0, 0, 0, 15))
+
         card.setGraphicsEffect(shadow)
+
         return card
 
     def _crear_card_directorio(self) -> QWidget:
         card = self._crear_tarjeta_base()
+
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
 
         etiqueta = crear_fila_icono_texto(
-            "fa5s.folder", "Directorio de trabajo",
-            color_icono=TEXTO, color_texto=TEXTO
+            "fa5s.folder",
+            "Directorio de trabajo",
+            color_icono=TEXTO,
+            color_texto=TEXTO,
         )
 
         fila = QHBoxLayout()
@@ -316,8 +355,12 @@ class MainWindow(QMainWindow):
         """)
 
         self.btn_browse = crear_boton_icono(
-            "Examinar", "fa5s.folder-open",
-            color_fondo=ROJO, color_texto=BLANCO, color_hover=ROJO_HOVER, alto=44
+            "Examinar",
+            "fa5s.folder-open",
+            color_fondo=ROJO,
+            color_texto=BLANCO,
+            color_hover=ROJO_HOVER,
+            alto=44,
         )
         self.btn_browse.clicked.connect(self.browse_folder)
 
@@ -326,35 +369,55 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(etiqueta)
         layout.addLayout(fila)
+
         return card
 
     def _crear_card_periodo(self) -> QWidget:
         card = self._crear_tarjeta_base()
+
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
 
         etiqueta = crear_fila_icono_texto(
-            "fa5s.calendar-alt", "Periodo de análisis",
-            color_icono=TEXTO, color_texto=TEXTO
+            "fa5s.calendar-alt",
+            "Periodo de análisis",
+            color_icono=TEXTO,
+            color_texto=TEXTO,
         )
 
         anio_actual = str(datetime.datetime.now().year)
-        self.combo_ano = crear_menubar("Año", self.datos_anos, default_val=anio_actual)
+
+        self.combo_ano = crear_menubar(
+            "Año",
+            self.datos_anos,
+            default_val=anio_actual,
+        )
         self.combo_mes = crear_menubar("Mes", self.datos_meses)
 
-        # Sub-bloques con etiqueta propia (Año / Mes), como en el diseño
         bloque_ano = QVBoxLayout()
         bloque_ano.setSpacing(6)
+
         lbl_ano = QLabel("Año")
-        lbl_ano.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 11px; font-family: {FONT_FAMILY};")
+        lbl_ano.setStyleSheet(f"""
+            color: {TEXTO_SECUNDARIO};
+            font-size: 11px;
+            font-family: {FONT_FAMILY};
+        """)
+
         bloque_ano.addWidget(lbl_ano)
         bloque_ano.addWidget(self.combo_ano)
 
         bloque_mes = QVBoxLayout()
         bloque_mes.setSpacing(6)
+
         lbl_mes = QLabel("Mes")
-        lbl_mes.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 11px; font-family: {FONT_FAMILY};")
+        lbl_mes.setStyleSheet(f"""
+            color: {TEXTO_SECUNDARIO};
+            font-size: 11px;
+            font-family: {FONT_FAMILY};
+        """)
+
         bloque_mes.addWidget(lbl_mes)
         bloque_mes.addWidget(self.combo_mes)
 
@@ -365,34 +428,52 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(etiqueta)
         layout.addLayout(fila_combos)
+
         return card
 
     def _crear_progreso(self) -> QWidget:
         self.progreso_widget = QWidget()
         self.progreso_widget.setVisible(False)
+
         layout = QVBoxLayout(self.progreso_widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
         self.lbl_progreso = QLabel("Preparando...")
-        self.lbl_progreso.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 12px; font-family: {FONT_FAMILY};")
+        self.lbl_progreso.setStyleSheet(f"""
+            color: {TEXTO_SECUNDARIO};
+            font-size: 12px;
+            font-family: {FONT_FAMILY};
+        """)
 
         self.barra_progreso = crear_barra_progreso()
 
         layout.addWidget(self.lbl_progreso)
         layout.addWidget(self.barra_progreso)
+
         return self.progreso_widget
 
     def _crear_boton_iniciar(self) -> QPushButton:
         self.boton_iniciar = crear_boton_icono(
-            "INICIAR EXTRACCIÓN", "fa5s.bolt",
-            color_fondo=ROJO, color_texto=BLANCO, color_hover=ROJO_HOVER,
-            alto=52, radio=12, tam_icono=15
+            "INICIAR EXTRACCIÓN",
+            "fa5s.bolt",
+            color_fondo=ROJO,
+            color_texto=BLANCO,
+            color_hover=ROJO_HOVER,
+            alto=52,
+            radio=12,
+            tam_icono=15,
         )
+
         self.boton_iniciar.setStyleSheet(self.boton_iniciar.styleSheet() + f"""
-            QPushButton {{ font-size: 14px; font-weight: 800; letter-spacing: 1px;
-                           font-family: {FONT_FAMILY_TITLE}; }}
+            QPushButton {{
+                font-size: 14px;
+                font-weight: 800;
+                letter-spacing: 1px;
+                font-family: {FONT_FAMILY_TITLE};
+            }}
         """)
+
         self.boton_iniciar.clicked.connect(self.on_click_iniciar)
 
         shadow_btn = QGraphicsDropShadowEffect(self)
@@ -400,19 +481,25 @@ class MainWindow(QMainWindow):
         shadow_btn.setXOffset(0)
         shadow_btn.setYOffset(6)
         shadow_btn.setColor(QColor(200, 16, 46, 70))
+
         self.boton_iniciar.setGraphicsEffect(shadow_btn)
 
         return self.boton_iniciar
 
-    # ── PANEL DERECHO (Visual Hero) ───────────────────────────────
+    # ── PANEL DERECHO ─────────────────────────────────────────────
+
     def _crear_panel_derecho(self) -> QWidget:
         panel = QWidget()
         panel.setFixedWidth(600)
         panel.setObjectName("panel_derecho")
 
-        # Si existe una imagen de fondo (textura/globo), se usa como base;
-        # si no, se aplica un degradado rojo corporativo.
-        ruta_fondo = os.path.join(self.ruta_raiz, "src", "assets", "images", "fondo.png").replace("\\", "/")
+        ruta_fondo = os.path.join(
+            self.ruta_raiz,
+            "src",
+            "assets",
+            "images",
+            "fondo.png",
+        ).replace("\\", "/")
 
         if os.path.exists(ruta_fondo):
             panel.setStyleSheet(f"""
@@ -424,8 +511,14 @@ class MainWindow(QMainWindow):
         else:
             panel.setStyleSheet(f"""
                 QWidget#panel_derecho {{
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 {ROJO}, stop:1 {ROJO_OSCURO});
+                    background: qlineargradient(
+                        x1:0,
+                        y1:0,
+                        x2:1,
+                        y2:1,
+                        stop:0 {ROJO},
+                        stop:1 {ROJO_OSCURO}
+                    );
                     border-bottom-right-radius: 12px;
                 }}
             """)
@@ -434,7 +527,6 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(36, 40, 36, 32)
         layout.setSpacing(0)
 
-        # Título
         lbl_titulo = QLabel("SISTEMA DE\nEXTRACCIÓN ZEUS")
         lbl_titulo.setStyleSheet(f"""
             color: {TEXTO_SECUNDARIO};
@@ -458,10 +550,17 @@ class MainWindow(QMainWindow):
 
         linea = QFrame()
         linea.setFixedSize(46, 3)
-        linea.setStyleSheet(f"background-color: {BLANCO}; border-radius: 1px; margin-top: 14px;")
+        linea.setStyleSheet(f"""
+            background-color: {BLANCO};
+            border-radius: 1px;
+            margin-top: 14px;
+        """)
         layout.addWidget(linea)
 
-        lbl_desc = QLabel("Automatiza la extracción de información financiera\n y presupuestal desde el SISFONAFE.")
+        lbl_desc = QLabel(
+            "Automatiza la extracción de información financiera\n"
+            " y presupuestal desde el SISFONAFE."
+        )
         lbl_desc.setWordWrap(True)
         lbl_desc.setStyleSheet(f"""
             color: {TEXTO_SECUNDARIO};
@@ -473,7 +572,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(lbl_desc)
 
         layout.addStretch()
-
         layout.addWidget(self._crear_card_archivos())
 
         return panel
@@ -488,10 +586,9 @@ class MainWindow(QMainWindow):
             }}
         """)
 
-        # La card solo ocupará el ancho necesario
         card.setSizePolicy(
             QSizePolicy.Policy.Maximum,
-            QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Preferred,
         )
 
         layout = QVBoxLayout(card)
@@ -507,8 +604,9 @@ class MainWindow(QMainWindow):
         """)
         lbl_titulo.setSizePolicy(
             QSizePolicy.Policy.Maximum,
-            QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Fixed,
         )
+
         layout.addWidget(lbl_titulo)
 
         items = [
@@ -525,7 +623,7 @@ class MainWindow(QMainWindow):
             item = crear_item_check(texto)
             item.setSizePolicy(
                 QSizePolicy.Policy.Maximum,
-                QSizePolicy.Policy.Fixed
+                QSizePolicy.Policy.Fixed,
             )
             layout.addWidget(item)
 
@@ -534,6 +632,7 @@ class MainWindow(QMainWindow):
         return card
 
     # ── FOOTER ────────────────────────────────────────────────────
+
     def _crear_footer(self) -> QWidget:
         footer = QWidget()
         footer.setFixedHeight(34)
@@ -543,11 +642,19 @@ class MainWindow(QMainWindow):
             border-bottom-left-radius: 12px;
             border-bottom-right-radius: 12px;
         """)
+
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(20, 0, 20, 0)
 
-        lbl = QLabel("Uso interno • Versión 1.0.0 • Área Corporativa de Presupuesto")
-        lbl.setStyleSheet(f"color: {TEXTO_SECUNDARIO}; font-size: 11px; font-family: {FONT_FAMILY};")
+        lbl = QLabel(
+            "Uso interno • Versión 1.0.0 • Área Corporativa de Presupuesto"
+        )
+        lbl.setStyleSheet(f"""
+            color: {TEXTO_SECUNDARIO};
+            font-size: 11px;
+            font-family: {FONT_FAMILY};
+        """)
+
         layout.addStretch()
         layout.addWidget(lbl)
         layout.addStretch()
@@ -555,11 +662,15 @@ class MainWindow(QMainWindow):
         return footer
 
     # ══════════════════════════════════════════════════════════════
-    # Métodos de título / movimiento de ventana
+    # MOVIMIENTO DE VENTANA
     # ══════════════════════════════════════════════════════════════
+
     def title_bar_mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._drag_pos = (
+                event.globalPosition().toPoint()
+                - self.frameGeometry().topLeft()
+            )
             event.accept()
 
     def title_bar_mouseMoveEvent(self, event: QMouseEvent):
@@ -572,28 +683,55 @@ class MainWindow(QMainWindow):
             self.showNormal()
         else:
             self.showMaximized()
+
         self._is_maximized = not self._is_maximized
 
     def browse_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Directorio")
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Seleccionar Directorio",
+        )
+
         if folder:
             self.campo_ruta.setText(folder)
 
     # ══════════════════════════════════════════════════════════════
-    # Métodos de eventos / lógica de negocio (sin cambios funcionales)
+    # LÓGICA DE EJECUCIÓN CON QPROCESS
     # ══════════════════════════════════════════════════════════════
+
     def on_click_iniciar(self):
         directorio = self.campo_ruta.text().strip()
+
         if not directorio:
-            show_warning(self, "Advertencia", "Por favor selecciona un directorio de trabajo válido.")
+            show_warning(
+                self,
+                "Advertencia",
+                "Por favor selecciona un directorio de trabajo válido.",
+            )
             return
 
-        anio = self.combo_ano.currentText()
-        mes_texto = self.combo_mes.currentText()
+        anio = self.combo_ano.currentText().strip()
+        mes_texto = self.combo_mes.currentText().strip()
+
+        if not anio or not mes_texto:
+            show_warning(
+                self,
+                "Advertencia",
+                "Por favor selecciona un año y un mes válidos.",
+            )
+            return
+
+        if self._process is not None:
+            show_warning(
+                self,
+                "Advertencia",
+                "Ya hay un proceso en ejecución.",
+            )
+            return
+
         mes = mes_texto.split(",")[0].strip()
         fecha_cierre_sistema = datetime.datetime.now().strftime("%d.%m.%Y")
 
-        # Modificación de UI estado de carga
         self.boton_iniciar.setEnabled(False)
         self.boton_iniciar.setText("  EJECUTANDO...")
         self.campo_ruta.setEnabled(False)
@@ -602,82 +740,207 @@ class MainWindow(QMainWindow):
         self.combo_mes.setEnabled(False)
 
         self.progreso_widget.setVisible(True)
-        self.barra_progreso.setRange(0, 0)  # Loading infinito
+        self.barra_progreso.setRange(0, 0)
+        self.lbl_progreso.setText("Iniciando proceso...")
 
-        # Ejecutar scrapping en hilo de fondo
-        self._worker = ScrappingWorker(directorio, anio, mes, fecha_cierre_sistema)
-        self._worker.finished.connect(self._on_scrapping_finished)
-        self._worker.finished.connect(self._release_worker)
-        self._worker.error.connect(self._on_scrapping_error)
-        self._worker.error.connect(self._release_worker)
-        self._worker.progress.connect(self._on_scrapping_progress)
-        self._worker.start()
+        self._ultimo_error_proceso = None
+        self._process_stdout_buffer = ""
 
-    def _reset_ui_state(self):
-        self.boton_iniciar.setEnabled(True)
-        self.boton_iniciar.setText("  INICIAR EXTRACCIÓN")
-        self.campo_ruta.setEnabled(True)
-        self.btn_browse.setEnabled(True)
-        self.combo_ano.setEnabled(True)
-        self.combo_mes.setEnabled(True)
-        self.progreso_widget.setVisible(False)
-        self.barra_progreso.setRange(0, 100)
+        self._proceso_marco_done = False
+        self._success_mostrado = False
 
-    def _on_scrapping_finished(self):
-        self._reset_ui_state()
-        show_success(self, "Completado", "El proceso de extracción finalizó correctamente con todos los excels procesados.")
+        payload = {
+            "directorio": directorio,
+            "anio": anio,
+            "mes": mes,
+            "fecha_cierre": fecha_cierre_sistema,
+        }
 
-    def _on_scrapping_error(self, mensaje):
-        self._reset_ui_state()
-        if "Proceso cancelado" not in str(mensaje):
-            show_error(self, "Error de Ejecución", f"Ocurrió un problema durante la extracción:\n{mensaje}")
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        payload_b64 = base64.b64encode(payload_json.encode("utf-8")).decode("utf-8")
 
-    def _on_scrapping_progress(self, mensaje):
-        self.lbl_progreso.setText(mensaje)
+        programa, argumentos = self._crear_comando_scrapping(payload_b64)
 
-    def _release_worker(self):
-        """Limpia la referencia al worker cuando termina (éxito o error)."""
-        self._worker = None
+        process = QProcess(self)
+        process.setProcessChannelMode(QProcess.MergedChannels)
 
-    # ── Cierre seguro de la ventana ─────────────────────────────────
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("PYTHONIOENCODING", "utf-8")
+        env.insert("PYTHONUTF8", "1")
+        process.setProcessEnvironment(env)
+
+        process.readyReadStandardOutput.connect(self._on_process_output)
+        process.finished.connect(self._on_process_finished)
+        process.errorOccurred.connect(self._on_process_error)
+
+        self._process = process
+        self._proceso_marco_done = False
+
+        self._process.start(programa, argumentos)
+
+    def _crear_comando_scrapping(self, payload_b64):
+        """
+        Devuelve el ejecutable y argumentos para lanzar el proceso hijo.
+
+        En desarrollo:
+            python main.py --scrapping-worker payload
+
+        En PyInstaller:
+            app.exe --scrapping-worker payload
+        """
+
+        if getattr(sys, "frozen", False):
+            programa = sys.executable
+            argumentos = [
+                "--scrapping-worker",
+                payload_b64,
+            ]
+            return programa, argumentos
+
+        programa = sys.executable
+
+        script_principal = os.path.abspath(sys.argv[0])
+
+        if not script_principal or not os.path.exists(script_principal):
+            script_principal = os.path.join(self.ruta_raiz, "main.py")
+
+        argumentos = [
+            script_principal,
+            "--scrapping-worker",
+            payload_b64,
+        ]
+
+        return programa, argumentos
+
+    def _on_process_output(self):
+        if self._process is None:
+            return
+
+        data = self._process.readAllStandardOutput()
+        texto = bytes(data).decode("utf-8", errors="replace")
+
+        self._process_stdout_buffer += texto
+
+        lineas = self._process_stdout_buffer.splitlines(keepends=True)
+
+        if lineas and not lineas[-1].endswith(("\n", "\r")):
+            self._process_stdout_buffer = lineas.pop()
+        else:
+            self._process_stdout_buffer = ""
+
+        for linea in lineas:
+            self._procesar_linea_proceso(linea.strip())
+
+    def _procesar_linea_proceso(self, linea):
+        if not linea:
+            return
+
+        print(linea)
+
+        if linea.startswith("PROGRESS::"):
+            mensaje = linea.replace("PROGRESS::", "", 1)
+            self.lbl_progreso.setText(mensaje)
+
+            if "Proceso finalizado" in mensaje:
+                self._marcar_scrapping_finalizado()
+
+            return
+
+        if linea.startswith("ERROR::"):
+            mensaje = linea.replace("ERROR::", "", 1)
+            self._ultimo_error_proceso = mensaje
+            return
+
+        if linea.startswith("DONE::"):
+            self._marcar_scrapping_finalizado()
+            return
+
+        if "[Progreso] Proceso finalizado" in linea:
+            self._marcar_scrapping_finalizado()
+            return
+
+        if linea.strip() == "Proceso finalizado":
+            self._marcar_scrapping_finalizado()
+            return
+
+    def _marcar_scrapping_finalizado(self):
+        if self._proceso_marco_done:
+            return
+
+        self._proceso_marco_done = True
+        self._ultimo_error_proceso = None
+
+        self.lbl_progreso.setText("Proceso finalizado. Cerrando aplicación...")
+
+        if not self._success_mostrado and not self._cerrando:
+            self._success_mostrado = True
+
+            show_success(
+                self,
+                "Proceso terminado",
+                "El proceso terminó correctamente. La aplicación se cerrará por completo.",
+            )
+
+            self.close()
+
+    def _on_process_finished(self, exit_code, exit_status):
+        proceso_finalizado = self.sender()
+
+        if self._process is not None and proceso_finalizado is not self._process:
+            return
+
+        if self._process_stdout_buffer:
+            self._procesar_linea_proceso(self._process_stdout_buffer.strip())
+            self._process_stdout_buffer = ""
+
+        self._process = None
+
+        try:
+            proceso_finalizado.deleteLater()
+        except Exception:
+            pass
+
+        if self._cerrando:
+            return
+
+        if self._success_mostrado:
+            return
+
+        if exit_code == 0 or self._proceso_marco_done:
+            self._success_mostrado = True
+
+            show_success(
+                self,
+                "Completado",
+                "El proceso de extracción finalizó correctamente con todos los excels procesados.",
+            )
+
+            self.close()
+        else:
+            mensaje = self._ultimo_error_proceso or (
+                "El proceso de scrapping terminó con error."
+            )
+
+            show_error(
+                self,
+                "Error de Ejecución",
+                f"Ocurrió un problema durante la extracción:\n{mensaje}",
+            )
+
+    def _on_process_error(self, error):
+        if self._cerrando:
+            return
+
+        self._ultimo_error_proceso = str(error)
+
+    # ══════════════════════════════════════════════════════════════
+    # CIERRE SEGURO
+    # ══════════════════════════════════════════════════════════════
+
     def closeEvent(self, event):
-        """Intercepta el cierre para terminar el worker sin congelar la UI."""
-        # Si ya no hay worker corriendo, cerramos normal
-        if self._worker is None or not self._worker.isRunning():
+        if self._process is None or self._process.state() == QProcess.NotRunning:
             event.accept()
             return
 
-        # Ya estamos en proceso de cierre seguro: ignoramos clics repetidos de la X
-        if getattr(self, "_cerrando", False):
-            event.ignore()
-            return
-
-        event.ignore()  # No cerramos todavía
-        self._cerrando = True
-
-        # Feedback visual sin bloquear
-        self.lbl_progreso.setText("Cerrando de forma segura, espera un momento...")
-        self.progreso_widget.setVisible(True)
-        self.boton_iniciar.setEnabled(False)
-        self.setEnabled(False)  # evita que sigan llegando clics mientras cerramos
-
-        self._worker.requestInterruption()
-        self._worker.finished.connect(self._cerrar_definitivamente)
-
-        # Salvavidas: si en 12s el worker sigue sin responder (p.ej. Excel colgado
-        # esperando un diálogo), forzamos el cierre igual sin bloquear la UI.
-        self._close_timeout_timer = QTimer(self)
-        self._close_timeout_timer.setSingleShot(True)
-        self._close_timeout_timer.timeout.connect(self._forzar_cierre)
-        self._close_timeout_timer.start(12000)
-
-def _cerrar_definitivamente(self):
-    if hasattr(self, "_close_timeout_timer"):
-        self._close_timeout_timer.stop()
-    self.close()
-
-def _forzar_cierre(self):
-    if self._worker is not None and self._worker.isRunning():
-        self._worker.terminate()
-        self._worker.wait(1000)
-    self.close()
+        event.ignore()
+        return

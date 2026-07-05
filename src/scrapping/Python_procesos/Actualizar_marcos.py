@@ -1,118 +1,263 @@
 import os
 import time
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import tempfile
+import logging
+from pathlib import Path
+
 import pandas as pd
 from openpyxl import load_workbook
 
-async def actualizar_marco(ruta: str, max_workers: int = 8):
-    ruta = os.path.join(ruta, "MARCO")
+
+logger = logging.getLogger(__name__)
+
+
+def actualizar_marco(ruta: str):
+
+    carpeta = Path(ruta).expanduser().resolve() / "MARCO"
+
     CATEGORIA_ORDEN = {"M": 1, "I": 2, "P": 3, "S": 4, "3": 5}
 
-    def procesar_archivo(ruta_archivo: str) -> dict:
-        archivo = os.path.basename(ruta_archivo)
-        resultado = {"archivo": archivo, "ok": False, "hoja": "", "eliminadas": 0, "error": ""}
+    def validar_temporal_excel(ruta_temporal: Path, keep_vba: bool) -> None:
+        """
+        Verifica que el archivo temporal se haya guardado correctamente
+        antes de reemplazar el archivo original.
+        """
 
-        # Intentos repetidos por si el archivo está bloqueado en disco por Windows
+        if not ruta_temporal.exists():
+            raise FileNotFoundError(f"No se generó el archivo temporal: {ruta_temporal}")
+
+        if ruta_temporal.stat().st_size <= 0:
+            raise ValueError(f"El archivo temporal está vacío: {ruta_temporal}")
+
+        wb_validacion = None
+
+        try:
+            wb_validacion = load_workbook(
+                filename=str(ruta_temporal),
+                keep_vba=keep_vba,
+                read_only=True,
+            )
+        finally:
+            if wb_validacion is not None:
+                wb_validacion.close()
+
+    def procesar_archivo(ruta_archivo: Path) -> dict:
+        archivo = ruta_archivo.name
+
+        resultado = {
+            "archivo": archivo,
+            "ok": False,
+            "hoja": "",
+            "eliminadas": 0,
+            "error": "",
+        }
+
+        if not ruta_archivo.exists():
+            resultado["error"] = f"El archivo no existe: {ruta_archivo}"
+            return resultado
+
+        if not ruta_archivo.is_file():
+            resultado["error"] = f"La ruta no es un archivo válido: {ruta_archivo}"
+            return resultado
+
+        extension = ruta_archivo.suffix.lower()
+
+        if extension == ".xls":
+            resultado["error"] = (
+                "Formato .xls no soportado por openpyxl. "
+                "Debe convertirse previamente a .xlsx o .xlsm."
+            )
+            return resultado
+
+        if extension not in {".xlsx", ".xlsm"}:
+            resultado["error"] = f"Extensión no soportada: {extension}"
+            return resultado
+
+        keep_vba = extension == ".xlsm"
+
         for intento in range(3):
-            try:
-                # Forzamos una copia limpia del DataFrame para evitar hilos compartiendo memoria
-                df = pd.read_excel(ruta_archivo, sheet_name=0, header=0, engine="openpyxl").copy()
+            wb = None
+            temp_file = None
 
-                col_empresa     = df.columns[2]   # columna C
+            try:
+                df = pd.read_excel(
+                    str(ruta_archivo),
+                    sheet_name=0,
+                    header=0,
+                    engine="openpyxl",
+                ).copy()
+
+                if len(df.columns) <= 5:
+                    raise ValueError(
+                        "El archivo no tiene suficientes columnas. "
+                        "Se requieren al menos 6 columnas para usar C y F."
+                    )
+
+                col_empresa = df.columns[2]       # columna C
                 col_modificacion = df.columns[5]  # columna F
 
-                df[col_empresa]      = df[col_empresa].astype(str).str.strip()
+                df[col_empresa] = df[col_empresa].astype(str).str.strip()
                 df[col_modificacion] = df[col_modificacion].astype(str).str.strip()
 
-                # ── Mapear orden numérico
                 df["_orden"] = df[col_modificacion].map(CATEGORIA_ORDEN).fillna(0)
 
                 idx_max = df.groupby(col_empresa)["_orden"].idxmax()
-                # .copy() aquí es vital para romper cualquier referencia circular entre hilos
-                mejor_mod = df.loc[idx_max, [col_empresa, col_modificacion]].set_index(col_empresa)[col_modificacion].copy()
 
-                # ── Filtrar filas a conservar
-                mascara = df.apply(
-                    lambda r: mejor_mod.get(r[col_empresa], "") == r[col_modificacion], axis=1
+                mejor_mod = (
+                    df.loc[idx_max, [col_empresa, col_modificacion]]
+                    .set_index(col_empresa)[col_modificacion]
+                    .copy()
                 )
-                eliminadas = int((~mascara).sum())
-                df_filtrado = df[mascara].drop(columns=["_orden"]).reset_index(drop=True).copy()
 
-                # ── Escribir hoja copia con openpyxl
-                wb = load_workbook(ruta_archivo)
+                mascara = df.apply(
+                    lambda r: mejor_mod.get(r[col_empresa], "") == r[col_modificacion],
+                    axis=1,
+                )
+
+                eliminadas = int((~mascara).sum())
+
+                df_filtrado = (
+                    df[mascara]
+                    .drop(columns=["_orden"])
+                    .reset_index(drop=True)
+                    .copy()
+                )
+
+                wb = load_workbook(
+                    filename=str(ruta_archivo),
+                    keep_vba=keep_vba,
+                )
+
                 nombre_copia = f"Formulacion_{len(wb.worksheets) + 1}"
                 ws_copia = wb.create_sheet(title=nombre_copia)
 
-                # Encabezados
                 ws_copia.append(list(df_filtrado.columns))
-                # Datos fila a fila
+
                 for row in df_filtrado.itertuples(index=False, name=None):
                     ws_copia.append(list(row))
 
-                temp_file = ruta_archivo + ".tmp"
-                wb.save(temp_file)
-                wb.close() # Forzamos el cierre explícito del puntero del archivo
-                os.replace(temp_file, ruta_archivo)
-                
-                resultado.update({"ok": True, "hoja": nombre_copia, "eliminadas": eliminadas, "error": ""})
-                break # Éxito, salimos del bucle de reintentos
-                
+                fd, temp_name = tempfile.mkstemp(
+                    prefix=f".{ruta_archivo.stem}_",
+                    suffix=extension,
+                    dir=str(ruta_archivo.parent),
+                )
+                os.close(fd)
+
+                temp_file = Path(temp_name)
+
+                wb.save(str(temp_file))
+
+                # Cierre explícito del workbook antes de reemplazar el archivo original.
+                wb.close()
+                wb = None
+
+                validar_temporal_excel(temp_file, keep_vba=keep_vba)
+
+                os.replace(str(temp_file), str(ruta_archivo))
+                temp_file = None
+
+                resultado.update(
+                    {
+                        "ok": True,
+                        "hoja": nombre_copia,
+                        "eliminadas": eliminadas,
+                        "error": "",
+                    }
+                )
+
+                return resultado
+
             except PermissionError:
-                # Si el archivo está bloqueado por el OS, esperamos una fracción de segundo y reintentamos
+                resultado["error"] = "Archivo bloqueado en disco"
                 time.sleep(0.5)
-                resultado["error"] = "Archivo bloqueado en disco (I/O Concurrente)"
+
             except Exception as e:
                 resultado["error"] = str(e)
-                break # Si es otro error de código, no reintentamos
+                return resultado
+
+            finally:
+                if wb is not None:
+                    try:
+                        wb.close()
+                    except Exception as e:
+                        logger.warning(
+                            "No se pudo cerrar correctamente el workbook %s: %s",
+                            ruta_archivo,
+                            e,
+                        )
+
+                if temp_file is not None:
+                    try:
+                        if temp_file.exists():
+                            temp_file.unlink()
+                    except Exception as e:
+                        logger.warning(
+                            "No se pudo eliminar el archivo temporal %s: %s",
+                            temp_file,
+                            e,
+                        )
 
         return resultado
 
-    async def actualizar_marcos_async_inner(carpeta: str, max_workers: int = 8):
-        if not os.path.isdir(carpeta):
-            print(f"La carpeta no existe: {carpeta}")
-            return
+    if not carpeta.exists():
+        logger.error("La carpeta no existe: %s", carpeta)
+        return
 
-        # Evitamos archivos duplicados usando un set antes de pasarlo a lista
-        archivos_unicos = list(set([
-            os.path.join(carpeta, f)
-            for f in os.listdir(carpeta)
-            if f.lower().endswith((".xlsx", ".xls", ".xlsm"))
-            and not f.startswith("Gastos_Capital")
-            and not f.startswith("~$") # IGNORAR archivos temporales ocultos de Excel
-        ]))
+    if not carpeta.is_dir():
+        logger.error("La ruta no es una carpeta válida: %s", carpeta)
+        return
 
-        if not archivos_unicos:
-            print("No se encontraron archivos Excel válidos para procesar.")
-            return
+    archivos_unicos = sorted(
+        {
+            archivo.resolve()
+            for archivo in carpeta.iterdir()
+            if archivo.is_file()
+            and archivo.suffix.lower() in {".xlsx", ".xls", ".xlsm"}
+            and not archivo.name.startswith("Gastos_Capital")
+            and not archivo.name.startswith("~$")
+        }
+    )
 
-        total   = len(archivos_unicos)
-        workers = min(max_workers, total)
-        print(f"Archivos únicos a procesar: {total} | Max Workers: {workers}\n")
+    if not archivos_unicos:
+        logger.info("No se encontraron archivos Excel válidos para procesar.")
+        return
 
-        t_inicio    = time.perf_counter()
-        completados = errores = 0
+    total = len(archivos_unicos)
+    completados = 0
+    errores = 0
 
-        loop = asyncio.get_running_loop()
+    t_inicio = time.perf_counter()
 
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            tareas = [
-                loop.run_in_executor(executor, procesar_archivo, ruta_archivo)
-                for ruta_archivo in archivos_unicos
-            ]
+    logger.info("Archivos únicos a procesar secuencialmente: %s", total)
+
+    for ruta_archivo in archivos_unicos:
+        res = procesar_archivo(ruta_archivo)
+
+        completados += 1
+        estado = f"[{completados}/{total}]"
+
+        if res["ok"]:
+            logger.info(
+                "  %s OK  %s  ->  '%s' | eliminadas: %s",
+                estado,
+                res["archivo"],
+                res["hoja"],
+                res["eliminadas"],
+            )
+        else:
+            errores += 1
+            logger.error(
+                "  %s ERR %s  ->  %s",
+                estado,
+                res["archivo"],
+                res["error"],
+            )
             
-            for tarea_futura in asyncio.as_completed(tareas):
-                res = await tarea_futura
-                completados += 1
-                estado = f"[{completados}/{total}]"
+    t_fin = time.perf_counter()
 
-                if res["ok"]:
-                    print(f"  {estado} OK  {res['archivo']}  ->  '{res['hoja']}' | eliminadas: {res['eliminadas']}")
-                else:
-                    errores += 1
-                    print(f"  {estado} ERR {res['archivo']}  ->  {res['error']}")
-
-        t_fin = time.perf_counter()
-        print(f"\nCompletado en {t_fin - t_inicio:.2f}s | OK: {completados - errores} | Errores: {errores}")
-
-    await actualizar_marcos_async_inner(ruta, max_workers=max_workers)
+    logger.info(
+        "Completado en %.2fs | OK: %s | Errores: %s",
+        t_fin - t_inicio,
+        completados - errores,
+        errores,
+    )
