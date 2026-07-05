@@ -35,9 +35,9 @@ from pathlib import Path
 import asyncio
 
 
-# ══════════════════════════════════════════════════════════════
+# ============================================================
 # FUNCIONES EXISTENTES
-# ══════════════════════════════════════════════════════════════
+# ============================================================
 
 
 def formato_name_plantillas(ruta_principal, mes):
@@ -72,7 +72,7 @@ def formato_name_plantillas(ruta_principal, mes):
         return
 
     if not ruta_base.is_dir():
-        print(f"Aviso: la ruta principal no es una carpeta válida: {ruta_base}", flush=True)
+        print(f"Aviso: la ruta principal no es una carpeta valida: {ruta_base}", flush=True)
         return
 
     for elemento in sorted(os.listdir(ruta_base)):
@@ -165,13 +165,13 @@ def copiarPlantillas(ruta_principal):
             except OSError as e:
                 print(f"Aviso: no se pudo eliminar temporal '{destino_temporal}': {e}", flush=True)
 
-    print("¡Proceso de copia finalizado!", flush=True)
+    print("Proceso de copia finalizado!", flush=True)
 
 
 def _validar_resultado_no_async(nombre, resultado):
     """
-    Evita que el pipeline continúe si una función que debe ser síncrona
-    todavía devuelve una corrutina.
+    Evita que el pipeline continue si una funcion que debe ser sincrona
+    todavia devuelve una corrutina.
     """
 
     if inspect.isawaitable(resultado):
@@ -182,9 +182,9 @@ def _validar_resultado_no_async(nombre, resultado):
             pass
 
         raise TypeError(
-            f"[{nombre}] devolvió una corrutina/awaitable. "
+            f"[{nombre}] devolvio una corrutina/awaitable. "
             "Solo Crear_Descargar_0.crear_descargar puede ser async. "
-            "Convierte esta función a síncrona antes de llamarla desde el pipeline."
+            "Convierte esta funcion a sincrona antes de llamarla desde el pipeline."
         )
 
 
@@ -199,14 +199,14 @@ def ejecutar_con_tiempo(nombre, funcion, *args, **kwargs):
     print(f"[{nombre}] finalizado en {duracion:.2f} segundos.", flush=True)
 
     if resultado is False:
-        raise RuntimeError(f"[{nombre}] finalizó con resultado False")
+        raise RuntimeError(f"[{nombre}] finalizo con resultado False")
 
     return resultado
 
 
 async def _ejecutar_crear_descargar_async(ruta_principal, anio, mes):
     """
-    Único punto async permitido.
+    Unico punto async permitido.
     """
 
     resultado = Crear_Descargar_0.crear_descargar(ruta_principal, anio, mes)
@@ -215,14 +215,14 @@ async def _ejecutar_crear_descargar_async(ruta_principal, anio, mes):
         resultado = await resultado
 
     if resultado is False:
-        raise RuntimeError("[Crear_Descargar_0.crear_descargar] finalizó con resultado False")
+        raise RuntimeError("[Crear_Descargar_0.crear_descargar] finalizo con resultado False")
 
     return resultado
 
 
 def ejecutar_crear_descargar_con_tiempo(ruta_principal, anio, mes):
     """
-    Ejecuta únicamente Crear_Descargar_0.crear_descargar con asyncio.run().
+    Ejecuta unicamente Crear_Descargar_0.crear_descargar con asyncio.run().
     No introduce paralelismo.
     """
 
@@ -259,7 +259,7 @@ def _pipeline_sync(
 
     Regla:
     - Crear_Descargar_0.crear_descargar puede ser async.
-    - Todo lo demás debe ser síncrono.
+    - Todo lo demas debe ser sincrono.
     """
 
     _verificar_cancelacion(check_cancel)
@@ -298,7 +298,7 @@ def _pipeline_sync(
     )
 
     _verificar_cancelacion(check_cancel)
-    reportar("Copiando formulación/ejecución...")
+    reportar("Copiando formulacion/ejecucion...")
     ejecutar_con_tiempo(
         "copiar_pegar_form_ejecu.copiar_pegar_form_ejecu",
         copiar_pegar_form_ejecu.copiar_pegar_form_ejecu,
@@ -306,137 +306,137 @@ def _pipeline_sync(
     )
 
     print("Proceso Python_procesos finalizado", flush=True)
-# ═══ Fase 2: Bases_Oficia**═════════════════════════════════**═══════════
 
+    # Fase 2: Bases_Oficial
+    _verificar_cancelacion(check_cancel)
+    reportar("Actualizando datos iniciales...")
+    ejecutar_con_tiempo(
+        "A.actualizar_datos_iniciales",
+        A.actualizar_datos_iniciales,
+        ruta_principal,
+        anio,
+        mes,
+        fecha_cierre_sistema,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Actualizando datos iniciales...")
-    # ejecutar_con_tiempo(
-    #     "A.actualizar_datos_iniciales",
-    #     A.actualizar_datos_iniciales,
-    #     ruta_principal,
-    #     anio,
-    #     mes,
-    #     fecha_cierre_sistema,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Copiando cierre y validacion...")
+    ejecutar_con_tiempo(
+        "B.copiar_pegar_cierre_y_validacion",
+        B.copiar_pegar_cierre_y_validacion,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Copiando cierre y validación...")
-    # ejecutar_con_tiempo(
-    #     "B.copiar_pegar_cierre_y_validacion",
-    #     B.copiar_pegar_cierre_y_validacion,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Limpiando hojas Excel...")
+    ejecutar_con_tiempo(
+        "C.limpiar_hojas_excel",
+        C.limpiar_hojas_excel,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Limpiando hojas Excel...")
-    # ejecutar_con_tiempo(
-    #     "C.limpiar_hojas_excel",
-    #     C.limpiar_hojas_excel,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Creando archivos validacion GK...")
+    ejecutar_con_tiempo(
+        "D.crear_archivos_validacion",
+        D.crear_archivos_validacion,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Creando archivos validación GK...")
-    # ejecutar_con_tiempo(
-    #     "D.crear_archivos_validacion",
-    #     D.crear_archivos_validacion,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Actualizando gastos de capital...")
+    ejecutar_con_tiempo(
+        "E.actualizar_gastos_capital",
+        E.actualizar_gastos_capital,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Actualizando gastos de capital...")
-    # ejecutar_con_tiempo(
-    #     "E.actualizar_gastos_capital",
-    #     E.actualizar_gastos_capital,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Consolidando GK flujo caja...")
+    ejecutar_con_tiempo(
+        "F.consolidar_gk_flujo_caja",
+        F.consolidar_gk_flujo_caja,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Consolidando GK flujo caja...")
-    # ejecutar_con_tiempo(
-    #     "F.consolidar_gk_flujo_caja",
-    #     F.consolidar_gk_flujo_caja,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Consolidando GK presupuesto...")
+    ejecutar_con_tiempo(
+        "G.consolidar_gk_presupuesto",
+        G.consolidar_gk_presupuesto,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Consolidando GK presupuesto...")
-    # ejecutar_con_tiempo(
-    #     "G.consolidar_gk_presupuesto",
-    #     G.consolidar_gk_presupuesto,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Validacion Flujo de Caja...")
+    ejecutar_con_tiempo(
+        "H.copiar_pegar_validacion_Flujo_Caja",
+        H.copiar_pegar_validacion_Flujo_Caja,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Validación Flujo de Caja...")
-    # ejecutar_con_tiempo(
-    #     "H.copiar_pegar_validacion_Flujo_Caja",
-    #     H.copiar_pegar_validacion_Flujo_Caja,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Validacion Presupuesto...")
+    ejecutar_con_tiempo(
+        "I.copiar_pegar_validacion_presupuesto",
+        I.copiar_pegar_validacion_presupuesto,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Validación Presupuesto...")
-    # ejecutar_con_tiempo(
-    #     "I.copiar_pegar_validacion_presupuesto",
-    #     I.copiar_pegar_validacion_presupuesto,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Desplegando formulas...")
+    ejecutar_con_tiempo(
+        "J.desplegar_formulas",
+        J.desplegar_formulas,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Desplegando fórmulas...")
-    # ejecutar_con_tiempo(
-    #     "J.desplegar_formulas",
-    #     J.desplegar_formulas,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Cambiando formato...")
+    ejecutar_con_tiempo(
+        "K.cambiar_formato",
+        K.cambiar_formato,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Cambiando formato...")
-    # ejecutar_con_tiempo(
-    #     "K.cambiar_formato",
-    #     K.cambiar_formato,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Limpiando depositos/colocaciones...")
+    ejecutar_con_tiempo(
+        "L.limpiar_hojas_excel",
+        L.limpiar_hojas_excel,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Limpiando depósitos/colocaciones...")
-    # ejecutar_con_tiempo(
-    #     "L.limpiar_hojas_excel",
-    #     L.limpiar_hojas_excel,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Copiando depositos/colocaciones...")
+    ejecutar_con_tiempo(
+        "M.copiar_pegar_deposiciones_colocaciones",
+        M.copiar_pegar_deposiciones_colocaciones,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Copiando depósitos/colocaciones...")
-    # ejecutar_con_tiempo(
-    #     "M.copiar_pegar_deposiciones_colocaciones",
-    #     M.copiar_pegar_deposiciones_colocaciones,
-    #     ruta_principal,
-    # )
+    _verificar_cancelacion(check_cancel)
+    reportar("Formato depositos/colocaciones...")
+    ejecutar_con_tiempo(
+        "N.formato_deposiciones_colocaciones",
+        N.formato_deposiciones_colocaciones,
+        ruta_principal,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("Formato depósitos/colocaciones...")
-    # ejecutar_con_tiempo(
-    #     "N.formato_deposiciones_colocaciones",
-    #     N.formato_deposiciones_colocaciones,
-    #     ruta_principal,
-    # )
+    print("BASE finalizado")
 
-    # print("BASE finalizado")
+    # Fase 3: EVA_Oficial
 
-    # ═══ Fase 3: EVA_Oficial ════════════════════════════════════════════════
+    _verificar_cancelacion(check_cancel)
+    reportar("EVA: Copiar y pegar...")
+    ejecutar_con_tiempo(
+        "A_eva.copiar_pegar",
+        A_eva.copiar_pegar,
+        ruta_principal,
+        anio,
+        mes,
+    )
 
-    # _verificar_cancelacion(check_cancel)
-    # reportar("EVA: Copiar y pegar...")
-    # ejecutar_con_tiempo(
-    #     "A_eva.copiar_pegar",
-    #     A_eva.copiar_pegar,
-    #     ruta_principal,
-    #     anio,
-    #     mes,
-    # )
 
 def scrapping_main(
     ruta_principal,
@@ -446,20 +446,6 @@ def scrapping_main(
     on_progreso=None,
     check_cancel=None,
 ):
-    """
-    Orquestador principal.
-
-    Ejecución:
-    - Secuencial.
-    - async solo para Crear_Descargar_0.crear_descargar.
-    - Sin ThreadPoolExecutor.
-    - Sin run_in_executor.
-    - Sin paralelismo sobre Excel ni archivos.
-
-    Al finalizar:
-    - Mata forzosamente el proceso principal del worker.
-    """
-
     ruta_base = Path(ruta_principal).expanduser().resolve()
 
     def reportar(msg):
@@ -474,7 +460,7 @@ def scrapping_main(
 
         if not ruta_base.is_dir():
             raise NotADirectoryError(
-                f"La ruta principal no es una carpeta válida: {ruta_base}"
+                f"La ruta principal no es una carpeta valida: {ruta_base}"
             )
 
         reportar("Iniciando proceso...")
@@ -520,6 +506,8 @@ def scrapping_main(
         reportar("Proceso finalizado")
         print("Proceso finalizado", flush=True)
         print("DONE::Proceso finalizado correctamente", flush=True)
+
+        time.sleep(1)
 
         return
 

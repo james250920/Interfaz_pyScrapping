@@ -3,8 +3,6 @@ import time
 import gc
 import tempfile
 import shutil
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import pythoncom
 import pywintypes
 import win32com.client as win32
@@ -56,7 +54,7 @@ def limpiar_cache_genpy():
 # -----------------------------
 # FUNCION PRINCIPAL (ASYNC + THREADPOOL)
 # -----------------------------
-async def copiar_pegar_validacion_Flujo_Caja(ruta_principal):
+def copiar_pegar_validacion_Flujo_Caja(ruta_principal):
 
     RUTA_VALIDACION = os.path.join(
         ruta_principal,
@@ -92,115 +90,127 @@ async def copiar_pegar_validacion_Flujo_Caja(ruta_principal):
     print(f"✓ Validación OK: AP1({ap1}) + AQ1({aq1}) = 0")
 
     # -----------------------------
-    # SUBFUNCION SINCRONA (aislada en hilo propio)
+    # PROCESO COM
     # -----------------------------
-    def _ejecutar_com_sync():
-        inicio = time.time()
+    inicio = time.time()
 
-        excel = None
-        wb_validacion = None
-        wb_destino = None
+    excel = None
+    wb_validacion = None
+    wb_destino = None
+    ruta_temporal = None
+    com_inicializado = False
 
-        def buscar_hoja(workbook, nombre):
-            for ws in workbook.Worksheets:
-                if ws.Name.strip() == nombre.strip():
-                    return ws
-            return None
+    def buscar_hoja(workbook, nombre):
+        for ws in workbook.Worksheets:
+            if ws.Name.strip() == nombre.strip():
+                return ws
+        return None
+
+    try:
+        # CRÍTICO: Inicializar COM
+        pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+        com_inicializado = True
+        
+        limpiar_cache_genpy()
+
+        # Copia temporal del archivo destino
+        fd, temp_name = tempfile.mkstemp(prefix="Base_FONAFE_", suffix=".xlsm", dir=os.path.dirname(RUTA_DESTINO))
+        os.close(fd)
+        ruta_temporal = temp_name
+        shutil.copy2(RUTA_DESTINO, ruta_temporal)
+
+        excel = win32.DispatchEx("Excel.Application")
+
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
+        excel.EnableEvents = False
+
+        print("Excel iniciado (Flujo Caja)")
+        print("Abriendo archivos...")
+
+        wb_validacion = com_call(lambda: excel.Workbooks.Open(
+            RUTA_VALIDACION,
+            UpdateLinks=False,
+            ReadOnly=True
+        ))
+
+        wb_destino = com_call(lambda: excel.Workbooks.Open(
+            ruta_temporal,
+            UpdateLinks=False,
+            ReadOnly=False
+        ))
+
+        excel.Calculation = -4135  # manual
+
+        errores = 0
+
+        for hoja_o, rango_o, hoja_d, rango_d in OPERACIONES:
+
+            ws_o = buscar_hoja(wb_validacion, hoja_o)
+            ws_d = buscar_hoja(wb_destino, hoja_d)
+
+            if ws_o and ws_d:
+                valor = com_call(lambda o=ws_o, r=rango_o: o.Range(r).Value)
+                com_call(lambda d=ws_d, r=rango_d, v=valor: setattr(d.Range(r), "Value", v))
+
+                print(f"  ✓ {hoja_o} → {hoja_d}")
+            else:
+                print(f"  ✗ Hoja faltante: {hoja_o} o {hoja_d}")
+                errores += 1
+
+        excel.Calculation = -4105  # automático
+        com_call(lambda: wb_destino.Save())
+
+        if errores == 0:
+            print("✓ Proceso Flujo Caja completado sin errores")
+        else:
+            print(f"⚠ Proceso Flujo Caja con {errores} errores")
+
+    except Exception as e:
+        print(f"✗ ERROR en Flujo Caja: {e}")
+        # Se relanza para que el pipeline se detenga: si esto falla, la
+        # Base FONAFE queda sin la validación de Flujo de Caja copiada.
+        raise
+
+    finally:
+        # -----------------------------
+        # CIERRE SEGURO Y ORDENADO
+        # -----------------------------
+        try:
+            if wb_validacion:
+                wb_validacion.Close(False)
+        except:
+            pass
 
         try:
-            # CRÍTICO: Inicializar COM en este hilo
-            pythoncom.CoInitialize()
-            limpiar_cache_genpy()
+            if wb_destino:
+                wb_destino.Close(False)
+        except:
+            pass
 
-            excel = win32.DispatchEx("Excel.Application")
+        try:
+            if excel:
+                excel.Quit()
+        except:
+            pass
 
-            excel.Visible = False
-            excel.DisplayAlerts = False
-            excel.ScreenUpdating = False
-            excel.EnableEvents = False
-
-            print("Excel iniciado (Flujo Caja)")
-            print("Abriendo archivos...")
-
-            wb_validacion = com_call(lambda: excel.Workbooks.Open(
-                RUTA_VALIDACION,
-                UpdateLinks=False,
-                ReadOnly=True
-            ))
-
-            wb_destino = com_call(lambda: excel.Workbooks.Open(
-                RUTA_DESTINO,
-                UpdateLinks=False,
-                ReadOnly=False
-            ))
-
-            excel.Calculation = -4135  # manual
-
-            errores = 0
-
-            for hoja_o, rango_o, hoja_d, rango_d in OPERACIONES:
-
-                ws_o = buscar_hoja(wb_validacion, hoja_o)
-                ws_d = buscar_hoja(wb_destino, hoja_d)
-
-                if ws_o and ws_d:
-                    valor = com_call(lambda o=ws_o, r=rango_o: o.Range(r).Value)
-                    com_call(lambda d=ws_d, r=rango_d, v=valor: setattr(d.Range(r), "Value", v))
-
-                    print(f"  ✓ {hoja_o} → {hoja_d}")
-                else:
-                    print(f"  ✗ Hoja faltante: {hoja_o} o {hoja_d}")
-                    errores += 1
-
-            excel.Calculation = -4105  # automático
-            com_call(lambda: wb_destino.Save())
-
-            if errores == 0:
-                print("✓ Proceso Flujo Caja completado sin errores")
-            else:
-                print(f"⚠ Proceso Flujo Caja con {errores} errores")
-
-        except Exception as e:
-            print(f"✗ ERROR en Flujo Caja: {e}")
-            # Se relanza para que el pipeline se detenga: si esto falla, la
-            # Base FONAFE queda sin la validación de Flujo de Caja copiada.
-            raise
-
-        finally:
-            # -----------------------------
-            # CIERRE SEGURO Y ORDENADO
-            # -----------------------------
-            try:
-                if wb_validacion:
-                    wb_validacion.Close(False)
-            except:
-                pass
-
-            try:
-                if wb_destino:
-                    wb_destino.Close(False)
-            except:
-                pass
-
-            try:
-                if excel:
-                    excel.Quit()
-            except:
-                pass
-
-            wb_validacion = None
-            wb_destino = None
-            excel = None
-            
-            gc.collect()
+        wb_validacion = None
+        wb_destino = None
+        excel = None
+        
+        gc.collect()
+        if com_inicializado:
             try:
                 pythoncom.CoUninitialize()
             except:
                 pass
 
-            print(f"Tiempo total Flujo Caja: {round(time.time() - inicio, 2)}s")
+        if ruta_temporal and os.path.exists(ruta_temporal):
+            try:
+                os.replace(ruta_temporal, RUTA_DESTINO)
+                print(f"Archivo modificado y reemplazado atómicamente: {RUTA_DESTINO}")
+            except Exception as e:
+                print(f"⚠ Advertencia: no se pudo reemplazar el archivo original, el temporal quedó en: {ruta_temporal}")
 
-    # Ejecutar en hilo aislado (max_workers=1 garantiza exclusión mutua COM)
-    loop = asyncio.get_running_loop()
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        await loop.run_in_executor(executor, _ejecutar_com_sync)
+        print(f"Tiempo total Flujo Caja: {round(time.time() - inicio, 2)}s")

@@ -1,20 +1,22 @@
 import os
 import time
 import gc
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import tempfile
+import shutil
+import logging
+
 import pythoncom
 import pywintypes
 import win32com.client as win32
-import win32process
-import win32api
 
-RPC_E_CALL_REJECTED         = -2147418111
+
+logger = logging.getLogger(__name__)
+
+RPC_E_CALL_REJECTED = -2147418111
 RPC_E_SERVERCALL_RETRYLATER = -2147417846
-# 0x800AC472: "Excel no puede completar esta tarea con los recursos disponibles"
-# Aparece de forma intermitente cuando el archivo aún conserva un handle/lock
-# de la instancia de Excel anterior que se acaba de cerrar (condición de carrera).
-VBA_E_IGNORE                 = -2146777998
+
+# 0x800AC472: Excel ocupado / no puede completar la tarea.
+VBA_E_IGNORE = -2146777998
 
 HRESULTS_REINTENTABLES = (
     RPC_E_CALL_REJECTED,
@@ -22,156 +24,351 @@ HRESULTS_REINTENTABLES = (
     VBA_E_IGNORE,
 )
 
-# Se mantiene tu lógica original de reintentos síncronos, ampliando los
-# códigos de error considerados transitorios/reintentables
+XL_CALCULATION_MANUAL = -4135
+XL_CALCULATION_AUTOMATIC = -4105
+
+# msoAutomationSecurityForceDisable = 3
+MSO_AUTOMATION_SECURITY_FORCE_DISABLE = 3
+
+
 def com_call(fn, reintentos=12, pausa=2.5):
+    """
+    Ejecuta una llamada COM con reintentos síncronos únicamente ante errores
+    transitorios habituales de Excel ocupado/rechazando llamadas.
+    """
+    ultimo_error = None
+
     for intento in range(1, reintentos + 1):
         try:
             return fn()
         except pywintypes.com_error as e:
+            ultimo_error = e
+
             if e.hresult in HRESULTS_REINTENTABLES:
-                print(f"    ⏳ Excel ocupado (hresult={e.hresult}), reintento {intento}/{reintentos} en {pausa}s...")
+                if intento == reintentos:
+                    raise
+
+                print(
+                    f"    ⏳ Excel ocupado (hresult={e.hresult}), "
+                    f"reintento {intento}/{reintentos} en {pausa}s..."
+                )
                 time.sleep(pausa)
             else:
                 raise
-    raise RuntimeError(f"Excel rechazó la llamada tras {reintentos} reintentos.")
+
+    raise RuntimeError(
+        f"Excel rechazó la llamada tras {reintentos} reintentos."
+    ) from ultimo_error
 
 
-# Convertida a la función principal asíncrona
-async def copiar_pegar_cierre_y_validacion(ruta_principal):
+def copiar_pegar_cierre_y_validacion(ruta_principal):
     inicio = time.time()
 
-    # Subfunción interna síncrona que ejecutará el Executor de forma aislada
-    def _ejecutar_proceso_com_sync():
-        RUTA_CIERRE_1 = os.path.join(ruta_principal, "Estado de Cierre al mes.xlsm")
-        RUTA_CIERRE_2 = os.path.join(ruta_principal, "Validación Data Marco y Ejecución al mes.xlsm")
-        RUTA_DESTINO  = os.path.join(ruta_principal, "Base FONAFE WEB al mes.xlsm")
+    ruta_principal_abs = os.path.abspath(ruta_principal)
 
-        OPS_CIERRE_1 = [
-            ("Resumen Marco", "D5:R41",   "Sistema Cierre", "D52:R88"),
-            ("Resumen Ejec",   "D5:R41",   "Sistema Cierre", "D9:R45"),
-            ("Resumen Marco", "B1",       "Sistema Cierre", "D47"),
-            ("Resumen Ejec",   "S5:AM41",  "Cierre FE",      "D7:X43"),
-            ("Resumen Ejec",   "AN5:BB41", "Cierre FE",      "AB7:AP43"),
-            ("Resumen Marco", "S5:X41",   "Cierre FE",      "D51:I87"),
-            ("Resumen Marco", "Y5:AD41",  "Cierre FE",      "V51:AA87"),
-            ("Resumen Marco", "AE5:AG41", "Cierre FE",      "AH51:AJ87"),
-            ("Resumen Marco", "AH5:AJ41", "Cierre FE",      "AN51:AP87"),
-        ]
+    RUTA_CIERRE_1 = os.path.abspath(
+        os.path.join(ruta_principal_abs, "Estado de Cierre al mes.xlsm")
+    )
+    RUTA_CIERRE_2 = os.path.abspath(
+        os.path.join(ruta_principal_abs, "Validación Data Marco y Ejecución al mes.xlsm")
+    )
+    RUTA_DESTINO = os.path.abspath(
+        os.path.join(ruta_principal_abs, "Base FONAFE WEB al mes.xlsm")
+    )
 
-        OPS_CIERRE_2 = [
-            ("Presupuesto",   "G4:AD3999", "PRE ", "C4:Z3999"),
-            ("Flujo de Caja", "G4:AD2343", "FLU",  "C4:Z2343"),
-            ("ESF",           "G4:AD2215", "ESF",  "C4:Z2215"),
-            ("ERI",           "G4:AD1519", "ERI",  "C4:Z1519"),
-        ]
+    OPS_CIERRE_1 = [
+        ("Resumen Marco", "D5:R41",   "Sistema Cierre", "D52:R88"),
+        ("Resumen Ejec",  "D5:R41",   "Sistema Cierre", "D9:R45"),
+        ("Resumen Marco", "B1",       "Sistema Cierre", "D47"),
+        ("Resumen Ejec",  "S5:AM41",  "Cierre FE",      "D7:X43"),
+        ("Resumen Ejec",  "AN5:BB41", "Cierre FE",      "AB7:AP43"),
+        ("Resumen Marco", "S5:X41",   "Cierre FE",      "D51:I87"),
+        ("Resumen Marco", "Y5:AD41",  "Cierre FE",      "V51:AA87"),
+        ("Resumen Marco", "AE5:AG41", "Cierre FE",      "AH51:AJ87"),
+        ("Resumen Marco", "AH5:AJ41", "Cierre FE",      "AN51:AP87"),
+    ]
 
-        def buscar_hoja_exacta(workbook, nombre):
-            for ws in workbook.Worksheets:
-                if ws.Name.strip() == nombre.strip():
+    OPS_CIERRE_2 = [
+        ("Presupuesto",   "G4:AD3999", "PRE ", "C4:Z3999"),
+        ("Flujo de Caja", "G4:AD2343", "FLU",  "C4:Z2343"),
+        ("ESF",           "G4:AD2215", "ESF",  "C4:Z2215"),
+        ("ERI",           "G4:AD1519", "ERI",  "C4:Z1519"),
+    ]
+
+    def buscar_hoja_exacta(workbook, nombre):
+        """
+        Busca hoja por nombre normalizado con strip(), manteniendo la lógica
+        funcional original.
+        """
+        worksheets = None
+        ws = None
+
+        try:
+            worksheets = workbook.Worksheets
+            total_hojas = com_call(lambda: worksheets.Count)
+
+            for indice in range(1, total_hojas + 1):
+                ws = com_call(lambda i=indice: worksheets.Item(i))
+                nombre_ws = com_call(lambda hoja=ws: hoja.Name)
+
+                if nombre_ws.strip() == nombre.strip():
                     return ws
+
+                ws = None
+
             return None
 
-        def ejecutar_operaciones(wb_origen, wb_destino, operaciones, etiqueta):
-            errores = 0
-            for hoja_orig, rango_orig, hoja_dest, rango_dest in operaciones:
-                ws_origen  = buscar_hoja_exacta(wb_origen,  hoja_orig)
+        finally:
+            worksheets = None
+
+    def ejecutar_operaciones(wb_origen, wb_destino, operaciones, etiqueta):
+        """
+        Ejecuta las operaciones de copiado de valores de forma estrictamente
+        secuencial. No agrega concurrencia ni paralelismo.
+        """
+        errores = 0
+
+        for hoja_orig, rango_orig, hoja_dest, rango_dest in operaciones:
+            ws_origen = None
+            ws_destino = None
+            rango_origen_obj = None
+            rango_destino_obj = None
+
+            try:
+                ws_origen = buscar_hoja_exacta(wb_origen, hoja_orig)
                 ws_destino = buscar_hoja_exacta(wb_destino, hoja_dest)
 
-                if ws_origen and ws_destino:
-                    valor = com_call(lambda o=ws_origen, r=rango_orig: o.Range(r).Value)
-                    com_call(lambda d=ws_destino, r=rango_dest, v=valor: setattr(d.Range(r), "Value", v))
+                if ws_origen is not None and ws_destino is not None:
+                    rango_origen_obj = com_call(
+                        lambda o=ws_origen, r=rango_orig: o.Range(r)
+                    )
+                    valor = com_call(lambda rg=rango_origen_obj: rg.Value)
+
+                    rango_destino_obj = com_call(
+                        lambda d=ws_destino, r=rango_dest: d.Range(r)
+                    )
+                    com_call(lambda rg=rango_destino_obj, v=valor: setattr(rg, "Value", v))
+
                     print(f"  ✓ {hoja_orig!r:20s} → {hoja_dest!r}")
                 else:
                     faltante = []
-                    if not ws_origen:  faltante.append(f"origen={hoja_orig!r}")
-                    if not ws_destino: faltante.append(f"destino={hoja_dest!r}")
+
+                    if ws_origen is None:
+                        faltante.append(f"origen={hoja_orig!r}")
+
+                    if ws_destino is None:
+                        faltante.append(f"destino={hoja_dest!r}")
+
                     print(f"  ✗ Hoja no encontrada: {', '.join(faltante)}")
                     errores += 1
 
-            print(f"  [{etiqueta}] {len(operaciones) - errores}/{len(operaciones)} operaciones OK\n")
-            return errores
+            finally:
+                rango_destino_obj = None
+                rango_origen_obj = None
+                ws_destino = None
+                ws_origen = None
 
-        # --- INICIO DEL FLUJO OPERATIVO ---
-        excel = wb_cierre1 = wb_cierre2 = wb_destino = None
-        pid_excel = None
+        print(f"  [{etiqueta}] {len(operaciones) - errores}/{len(operaciones)} operaciones OK\n")
+        return errores
 
-        try:
-            # CRÍTICO: Inicialización COM requerida para este hilo del Executor
-            pythoncom.CoInitialize()
-            
-            import tempfile, shutil
-            for patron in [
-                os.path.join(tempfile.gettempdir(), "gen_py"),
-                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Temp", "gen_py"),
-            ]:
-                if os.path.exists(patron):
-                    shutil.rmtree(patron, ignore_errors=True)
+    excel = None
+    wb_cierre1 = None
+    wb_cierre2 = None
+    wb_destino = None
 
-            excel = win32.DispatchEx("Excel.Application")
-            print(f"Proceso Excel iniciado en hilo secundario\n")
+    ruta_temporal = None
+    com_inicializado = False
+    guardado_correcto = False
+    reemplazo_correcto = False
 
-            excel.Visible        = False
-            excel.DisplayAlerts  = False
-            excel.ScreenUpdating = False
-            excel.EnableEvents   = False
+    try:
+        if not os.path.isdir(ruta_principal_abs):
+            raise NotADirectoryError(f"La carpeta principal no existe: {ruta_principal_abs}")
 
-            print("Abriendo archivos de control...\n")
-            wb_cierre1 = com_call(lambda: excel.Workbooks.Open(RUTA_CIERRE_1, UpdateLinks=False, ReadOnly=True))
-            wb_cierre2 = com_call(lambda: excel.Workbooks.Open(RUTA_CIERRE_2, UpdateLinks=False, ReadOnly=True))
-            wb_destino = com_call(lambda: excel.Workbooks.Open(RUTA_DESTINO,  UpdateLinks=False, ReadOnly=False))
+        for ruta in (RUTA_CIERRE_1, RUTA_CIERRE_2, RUTA_DESTINO):
+            if not os.path.exists(ruta):
+                raise FileNotFoundError(f"El archivo no existe: {ruta}")
 
-            excel.Calculation        = -4135  # Manual
-            excel.CalculateBeforeSave = False
+            if not os.path.isfile(ruta):
+                raise FileNotFoundError(f"La ruta no corresponde a un archivo válido: {ruta}")
 
-            print("=" * 55)
-            print("BLOQUE 1 · Estado de Cierre → Base FONAFE")
-            print("=" * 55)
-            errores1 = ejecutar_operaciones(wb_cierre1, wb_destino, OPS_CIERRE_1, "Bloque 1")
+        # Inicialización COM explícita en el hilo actual.
+        pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+        com_inicializado = True
 
-            print("=" * 55)
-            print("BLOQUE 2 · Validación Data → Base FONAFE")
-            print("=" * 55)
-            errores2 = ejecutar_operaciones(wb_cierre2, wb_destino, OPS_CIERRE_2, "Bloque 2")
+        # Crear copia temporal del destino antes de abrir Excel.
+        fd, temp_name = tempfile.mkstemp(
+            prefix="Base FONAFE WEB al mes_",
+            suffix=".xlsm",
+            dir=os.path.dirname(RUTA_DESTINO)
+        )
+        os.close(fd)
 
-            excel.Calculation = -4105  # Automático
-            com_call(lambda: wb_destino.Save())
+        ruta_temporal = os.path.abspath(temp_name)
+        shutil.copy2(RUTA_DESTINO, ruta_temporal)
 
-            total_errores = errores1 + errores2
-            if total_errores == 0:
-                print("✓ Guardado exitoso — sin errores.")
-            else:
-                print(f"⚠ Guardado con {total_errores} operación(es) fallida(s).")
+        excel = win32.DispatchEx("Excel.Application")
+        print("Proceso Excel iniciado\n")
 
-        except Exception as e:
-            print(f"\n✗ ERROR INESPERADO EN MATRIZ COM: {e}")
-            # IMPORTANTE: se relanza para que el pipeline se detenga y no
-            # continúe como si el copiado de Cierre/Validación se hubiera
-            # completado, cuando en realidad la Base FONAFE quedó incompleta.
-            raise
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.AskToUpdateLinks = False
+        excel.ScreenUpdating = False
+        excel.EnableEvents = False
+        excel.DisplayStatusBar = False
+        excel.AutomationSecurity = MSO_AUTOMATION_SECURITY_FORCE_DISABLE
 
-        finally:
-            # Asegurar cierre de libros y desinicialización
-            for wb in (wb_cierre1, wb_cierre2, wb_destino):
-                try:
-                    if wb: wb.Close(False)
-                except Exception: pass
+        print("Abriendo archivos de control...\n")
+
+        wb_cierre1 = com_call(
+            lambda: excel.Workbooks.Open(
+                RUTA_CIERRE_1,
+                UpdateLinks=False,
+                ReadOnly=True
+            )
+        )
+        wb_cierre2 = com_call(
+            lambda: excel.Workbooks.Open(
+                RUTA_CIERRE_2,
+                UpdateLinks=False,
+                ReadOnly=True
+            )
+        )
+        wb_destino = com_call(
+            lambda: excel.Workbooks.Open(
+                ruta_temporal,
+                UpdateLinks=False,
+                ReadOnly=False
+            )
+        )
+
+        com_call(lambda: setattr(excel, "Calculation", XL_CALCULATION_MANUAL))
+        com_call(lambda: setattr(excel, "CalculateBeforeSave", False))
+
+        print("=" * 55)
+        print("BLOQUE 1 · Estado de Cierre → Base FONAFE")
+        print("=" * 55)
+        errores1 = ejecutar_operaciones(
+            wb_cierre1,
+            wb_destino,
+            OPS_CIERRE_1,
+            "Bloque 1"
+        )
+
+        print("=" * 55)
+        print("BLOQUE 2 · Validación Data → Base FONAFE")
+        print("=" * 55)
+        errores2 = ejecutar_operaciones(
+            wb_cierre2,
+            wb_destino,
+            OPS_CIERRE_2,
+            "Bloque 2"
+        )
+
+        com_call(lambda: setattr(excel, "Calculation", XL_CALCULATION_AUTOMATIC))
+
+        print("Guardando archivo temporal...")
+        com_call(lambda: wb_destino.Save())
+        guardado_correcto = True
+
+        total_errores = errores1 + errores2
+
+        if total_errores == 0:
+            print("✓ Guardado exitoso — sin errores.")
+        else:
+            print(f"⚠ Guardado con {total_errores} operación(es) fallida(s).")
+
+    except Exception as e:
+        print(f"\n✗ ERROR INESPERADO EN MATRIZ COM: {e}")
+        logger.exception("Error inesperado en matriz COM")
+        raise
+
+    finally:
+        if excel is not None:
+            try:
+                com_call(lambda: setattr(excel, "Calculation", XL_CALCULATION_AUTOMATIC))
+            except Exception as e:
+                logger.warning("No se pudo restaurar cálculo automático de Excel: %s", e)
 
             try:
-                if excel: excel.Quit()
-            except Exception: pass
+                excel.ScreenUpdating = True
+                excel.EnableEvents = True
+                excel.DisplayStatusBar = True
+            except Exception as e:
+                logger.warning("No se pudieron restaurar propiedades de Excel: %s", e)
 
-            excel = wb_cierre1 = wb_cierre2 = wb_destino = None
-            gc.collect()
-            
-            # CRÍTICO: Liberar el entorno COM antes de abandonar el hilo
-            pythoncom.CoUninitialize()
-            
-        return pid_excel
+        # Cierre de libros. El destino se cierra sin guardar cambios adicionales
+        # porque el guardado explícito ya ocurrió antes.
+        if wb_destino is not None:
+            try:
+                com_call(lambda: wb_destino.Close(SaveChanges=False))
+            except Exception as e:
+                logger.warning("No se pudo cerrar el workbook destino: %s", e)
+            finally:
+                wb_destino = None
 
-    # --- COORDINACIÓN DEL LOOP ASÍNCRONO ---
-    loop = asyncio.get_running_loop()
-    
-    # max_workers=1 previene colisiones de punteros en la memoria de la instancia de Excel abierta
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        await loop.run_in_executor(executor, _ejecutar_proceso_com_sync)
+        if wb_cierre2 is not None:
+            try:
+                com_call(lambda: wb_cierre2.Close(SaveChanges=False))
+            except Exception as e:
+                logger.warning("No se pudo cerrar el workbook cierre 2: %s", e)
+            finally:
+                wb_cierre2 = None
+
+        if wb_cierre1 is not None:
+            try:
+                com_call(lambda: wb_cierre1.Close(SaveChanges=False))
+            except Exception as e:
+                logger.warning("No se pudo cerrar el workbook cierre 1: %s", e)
+            finally:
+                wb_cierre1 = None
+
+        if excel is not None:
+            try:
+                excel.Quit()
+            except Exception as e:
+                logger.warning("No se pudo cerrar Excel correctamente: %s", e)
+            finally:
+                excel = None
+
+        gc.collect()
+
+        if com_inicializado:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception as e:
+                logger.warning("No se pudo desinicializar COM correctamente: %s", e)
+
+        # Reemplazo atómico solo si el archivo temporal se guardó correctamente.
+        if ruta_temporal:
+            if guardado_correcto:
+                try:
+                    os.replace(ruta_temporal, RUTA_DESTINO)
+                    reemplazo_correcto = True
+                    print(f"Archivo destino reemplazado atómicamente: {RUTA_DESTINO}")
+                except Exception as e:
+                    print(
+                        "⚠ Advertencia: no se pudo reemplazar el archivo original, "
+                        f"el temporal quedó en: {ruta_temporal}"
+                    )
+                    logger.warning(
+                        "No se pudo reemplazar el archivo original %s con %s: %s",
+                        RUTA_DESTINO,
+                        ruta_temporal,
+                        e
+                    )
+            else:
+                try:
+                    if os.path.exists(ruta_temporal):
+                        os.remove(ruta_temporal)
+                except Exception as e:
+                    logger.warning(
+                        "No se pudo eliminar el archivo temporal fallido %s: %s",
+                        ruta_temporal,
+                        e
+                    )
+
+    if guardado_correcto and reemplazo_correcto:
+        print(f"✓ Copia y validación completadas en {round(time.time() - inicio, 2)} segundos.")
+
+    return None

@@ -1,6 +1,4 @@
 import os
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment
 
@@ -61,56 +59,50 @@ def cambiar_formato_y_llenar_ceros_fc(worksheet):
                     
     return ultima_fila
 
-async def cambiar_formato(ruta_principal):
+def cambiar_formato(ruta_principal):
     ruta_excel = rf"{ruta_principal}\Base FONAFE WEB al mes.xlsm"
     
-    # Subfunción síncrona interna que correrá dentro del Pool de Hilos
-    def _cambiar_sync():
-        if not os.path.exists(ruta_excel):
-            print(f"Error: No se encontro el archivo en la ruta: {ruta_excel}")
+    if not os.path.exists(ruta_excel):
+        print(f"Error: No se encontro el archivo en la ruta: {ruta_excel}")
+        return
+
+    print("Cargando archivo Excel...")
+    
+    try:
+        import tempfile
+        workbook = load_workbook(ruta_excel, keep_vba=True)
+        
+        hojas_validas = True
+        if "FBK-Alineado PRE" not in workbook.sheetnames:
+            print("Error: La hoja 'FBK-Alineado PRE' no existe en el archivo.")
+            hojas_validas = False
+        if "FBK-Alineado FLU" not in workbook.sheetnames:
+            print("Error: La hoja 'FBK-Alineado FLU' no existe en el archivo.")
+            hojas_validas = False
+            
+        if not hojas_validas:
             return
 
-        print("Cargando archivo Excel...")
+        print("Procesando hoja FBK-Alineado PRE...")
+        ws_pre = workbook["FBK-Alineado PRE"]
+        filas_pre = cambiar_formato_y_llenar_ceros(ws_pre)
+        print(f"Completo FBK alineado al Presupuesto. Procesadas {filas_pre} filas.")
+
+        print("Procesando hoja FBK-Alineado FLU...")
+        ws_flu = workbook["FBK-Alineado FLU"]
+        filas_flu = cambiar_formato_y_llenar_ceros_fc(ws_flu)
+        print(f"Completo FBK alineado al FC. Procesadas {filas_flu} filas.")
         
-        try:
-            workbook = load_workbook(ruta_excel, keep_vba=True)
-            
-            hojas_validas = True
-            if "FBK-Alineado PRE" not in workbook.sheetnames:
-                print("Error: La hoja 'FBK-Alineado PRE' no existe en el archivo.")
-                hojas_validas = False
-            if "FBK-Alineado FLU" not in workbook.sheetnames:
-                print("Error: La hoja 'FBK-Alineado FLU' no existe en el archivo.")
-                hojas_validas = False
-                
-            if not hojas_validas:
-                return
+        print("Guardando cambios de forma segura...")
+        fd, temp_file = tempfile.mkstemp(prefix="Base_FONAFE_", suffix=".xlsm", dir=os.path.dirname(ruta_excel))
+        os.close(fd)
+        
+        workbook.save(temp_file)
+        workbook.close()
+        os.replace(temp_file, ruta_excel)
+        print("Proceso completo de ambas hojas ejecutado exitosamente.")
 
-            print("Procesando hoja FBK-Alineado PRE...")
-            ws_pre = workbook["FBK-Alineado PRE"]
-            filas_pre = cambiar_formato_y_llenar_ceros(ws_pre)
-            print(f"Completo FBK alineado al Presupuesto. Procesadas {filas_pre} filas.")
-
-            print("Procesando hoja FBK-Alineado FLU...")
-            ws_flu = workbook["FBK-Alineado FLU"]
-            filas_flu = cambiar_formato_y_llenar_ceros_fc(ws_flu)
-            print(f"Completo FBK alineado al FC. Procesadas {filas_flu} filas.")
-            
-            print("Guardando cambios...")
-            temp_file = ruta_excel + ".tmp"
-            workbook.save(temp_file)
-            workbook.close()
-            os.replace(temp_file, ruta_excel)
-            print("Proceso completo de ambas hojas ejecutado exitosamente.")
-
-        except PermissionError:
-            print("Error: No se pudo guardar el archivo. Por favor, asegurese de cerrarlo en Excel.")
-        except Exception as e:
-            print(f"Ocurrio un error inesperado: {e}")
-    
-    # --- COORDINACIÓN ASÍNCRONA ---
-    loop = asyncio.get_running_loop()
-    
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        await loop.run_in_executor(executor, _cambiar_sync)
-
+    except PermissionError:
+        print("Error: No se pudo guardar el archivo. Por favor, asegurese de cerrarlo en Excel.")
+    except Exception as e:
+        print(f"Ocurrio un error inesperado: {e}")

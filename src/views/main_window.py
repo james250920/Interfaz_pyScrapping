@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QSizePolicy,
 )
-from PySide6.QtCore import Qt, QProcess, QProcessEnvironment
+from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
 from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
@@ -869,18 +869,62 @@ class MainWindow(QMainWindow):
 
         self._proceso_marco_done = True
         self._ultimo_error_proceso = None
+        self._success_mostrado = True
 
-        self.lbl_progreso.setText("Proceso finalizado. Cerrando aplicación...")
+        self.lbl_progreso.setText("Proceso finalizado correctamente.")
+        self.barra_progreso.setRange(0, 1)
+        self.barra_progreso.setValue(1)
 
-        if not self._success_mostrado and not self._cerrando:
-            self._success_mostrado = True
+        # Diferir el diálogo al siguiente ciclo del event loop.
+        # Mostrarlo directamente dentro del signal handler de
+        # readyReadStandardOutput impide que Qt lo pinte.
+        QTimer.singleShot(0, self._mostrar_dialogo_exito)
 
-            show_success(
-                self,
-                "Proceso terminado",
-                "El proceso terminó correctamente. La aplicación se cerrará por completo.",
-            )
+    def _mostrar_dialogo_exito(self):
+        """Muestra el popup de éxito y cierra la app al aceptar."""
+        show_success(
+            self,
+            "Completado",
+            "El proceso de extracción finalizó correctamente con todos los excels procesados.",
+        )
 
+        # Al aceptar el diálogo, matar el proceso hijo si sigue vivo y cerrar la app
+        self._terminar_y_cerrar()
+
+    def _terminar_y_cerrar(self):
+        """Mata el proceso hijo si sigue corriendo y cierra la aplicación."""
+        if self._process is not None:
+            try:
+                self._process.finished.disconnect(self._on_process_finished)
+            except Exception:
+                pass
+            try:
+                self._process.kill()
+                self._process.waitForFinished(3000)
+            except Exception:
+                pass
+            try:
+                self._process.deleteLater()
+            except Exception:
+                pass
+            self._process = None
+
+        try:
+            # Forzar el cierre de todos los procesos python.exe en Windows (limpieza agresiva)
+            import os
+            # Opcionalmente, matar por PID del proceso actual y sus hijos
+            pid_actual = os.getpid()
+            os.system(f"taskkill /F /PID {pid_actual} /T >nul 2>&1")
+            # Y para asegurar, matar otros python (si el usuario lo requirió específicamente)
+            os.system("taskkill /F /IM python.exe /T >nul 2>&1")
+        except Exception:
+            pass
+
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+        else:
             self.close()
 
     def _on_process_finished(self, exit_code, exit_status):
@@ -915,7 +959,7 @@ class MainWindow(QMainWindow):
                 "El proceso de extracción finalizó correctamente con todos los excels procesados.",
             )
 
-            self.close()
+            self._terminar_y_cerrar()
         else:
             mensaje = self._ultimo_error_proceso or (
                 "El proceso de scrapping terminó con error."

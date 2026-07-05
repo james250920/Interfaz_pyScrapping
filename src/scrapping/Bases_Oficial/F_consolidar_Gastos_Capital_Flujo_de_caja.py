@@ -1,7 +1,6 @@
 import pandas as pd
 import os
 import locale
-import asyncio
 from openpyxl.styles import Font, PatternFill, Alignment
 
 def obtener_separador_formula():
@@ -102,7 +101,7 @@ def agregar_validaciones(worksheet):
 # -----------------------------
 # PROCESO PRINCIPAL
 # -----------------------------
-async def consolidar_gk_flujo_caja(ruta_principal):
+def consolidar_gk_flujo_caja(ruta_principal):
 
     ruta_ejecucion = rf"{ruta_principal}\EJECUCION\Gastos_Capital_Ejecucion_Flujo_Caja.xlsx"
     ruta_marco = rf"{ruta_principal}\MARCO\Gastos_Capital_Formulacion_Flujo_Caja.xlsx"
@@ -211,9 +210,14 @@ async def consolidar_gk_flujo_caja(ruta_principal):
             axis=1
         )
 
-        os.makedirs(os.path.dirname(ruta_destino), exist_ok=True)
+        dir_destino = os.path.dirname(ruta_destino)
+        os.makedirs(dir_destino, exist_ok=True)
+        
+        import tempfile
+        fd, temp_name = tempfile.mkstemp(prefix="Validacion_GC_FLU_", suffix=".xlsx", dir=dir_destino)
+        os.close(fd)
 
-        with pd.ExcelWriter(ruta_destino, engine='openpyxl') as writer:
+        with pd.ExcelWriter(temp_name, engine='openpyxl') as writer:
 
             df_final.to_excel(
                 writer,
@@ -229,6 +233,8 @@ async def consolidar_gk_flujo_caja(ruta_principal):
 
             aplicar_estilo_encabezados(worksheet)
 
+        # Reemplazo atómico
+        os.replace(temp_name, ruta_destino)
         print(f"Éxito: Archivo generado en:\n{ruta_destino}")
 
     except KeyError as e:
