@@ -16,6 +16,7 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 
 
 try:
@@ -25,6 +26,11 @@ except Exception:
 
 # Modificado para ser una función async principal
 async def crear_descargar(ruta_principal, anio, mes):
+    print("PROGRESS::Iniciando módulo de descarga...", flush=True)
+    print(f"DEBUG::ruta_principal={ruta_principal}", flush=True)
+    print(f"DEBUG::anio={anio}", flush=True)
+    print(f"DEBUG::mes={mes}", flush=True)
+
     fecha_hoy = datetime.now().strftime("%d.%m.%Y")
 
     carpetas = {
@@ -68,23 +74,42 @@ async def crear_descargar(ruta_principal, anio, mes):
     # Optimizamos la función interna para aceptar las opciones custom de cada hilo
     def iniciar_instancia_driver(options):
         try:
+            print("PROGRESS::Preparando navegador Chrome...", flush=True)
+
             options.add_argument("--disable-gpu")
             options.add_argument("--no-first-run")
             options.add_argument("--no-default-browser-check")
-            options.add_argument("--disable-extensions")  # Ayuda a que sea más rápido en laptops lentas
-            options.add_argument("--disable-dev-shm-usage")  # Evita problemas de memoria compartida
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-background-networking")
-            
+
             if ChromeDriverManager:
-                service = Service(ChromeDriverManager().install())
-                return webdriver.Chrome(service=service, options=options)
+                print("PROGRESS::Obteniendo ChromeDriver...", flush=True)
+
+                driver_path = ChromeDriverManager().install()
+
+                print(f"DEBUG::ChromeDriver path={driver_path}", flush=True)
+
+                service = Service(driver_path)
+                driver = webdriver.Chrome(service=service, options=options)
             else:
-                return webdriver.Chrome(options=options)
+                print("PROGRESS::Iniciando Chrome sin webdriver-manager...", flush=True)
+                driver = webdriver.Chrome(options=options)
+
+            print("PROGRESS::Navegador Chrome iniciado correctamente.", flush=True)
+            return driver
+
         except WebDriverException as e:
-            print("✗ Error al crear el WebDriver de Chrome:", e)
-            print("  Verifica que Google Chrome esté instalado en esta computadora.")
+            print(f"ERROR::Error al crear el WebDriver de Chrome: {e}", flush=True)
+            print("ERROR::Verifica que Google Chrome esté instalado en esta computadora.", flush=True)
             traceback.print_exc()
-            logger.exception('Error creando WebDriver')
+            logger.exception("Error creando WebDriver")
+            raise
+
+        except Exception as e:
+            print(f"ERROR::Error inesperado iniciando ChromeDriver: {e}", flush=True)
+            traceback.print_exc()
+            logger.exception("Error inesperado creando WebDriver")
             raise
 
     # Subimos el timeout por defecto a 120 segundos por si la otra laptop es más lenta procesando
@@ -127,7 +152,7 @@ async def crear_descargar(ruta_principal, anio, mes):
         os.makedirs(profile_dir, exist_ok=True)
         os.makedirs(carpeta_descarga, exist_ok=True)
         
-        options = webdriver.ChromeOptions()
+        options = Options()
         options.add_experimental_option("prefs", {
             "download.default_directory": carpeta_descarga,
             "download.prompt_for_download": False,
@@ -174,17 +199,17 @@ async def crear_descargar(ruta_principal, anio, mes):
             wait.until(EC.frame_to_be_available_and_switch_to_it("right"))
             driver.execute_script("openSelectedMenu('EJECUCION')")
 
-            print("Descargando reportes financieros...")
+            print("PROGRESS::Ejecución: descargando reportes financieros...", flush=True)
             flujo("form_finan_ejec_balan_gen",   "Balance_General_Ejecucion.xlsx")
             flujo("form_finan_ejec_est_gan_per", "Estado_Ganancias_Perdidas_Ejecucion.xlsx")
 
-            print("Descargando reportes presupuestarios...")
+            print("PROGRESS::Ejecución: descargando reportes presupuestarios...", flush=True)
             flujo("form_pres_ejec_pres_ing_egr", "Presu_Ingresos_Egresos_Ejecucion.xlsx")
             flujo("form_pres_ejec_flujo_caja",   "Flujo_de_Caja_Ejecucion.xlsx")
             flujo("form_pres_ejec_gas_capital",  "Gastos_Capital_Ejecucion_Presupuesto.xlsx", {"TIPOGASTOCAPITAL": "1"})
             flujo("form_pres_ejec_gas_capital",  "Gastos_Capital_Ejecucion_Flujo_Caja.xlsx",  {"TIPOGASTOCAPITAL": "2"})
 
-            print("Descargando depósitos y colocaciones...")
+            print("PROGRESS::Ejecución: descargando depósitos y colocaciones...", flush=True)
             driver.switch_to.default_content()
             wait.until(EC.frame_to_be_available_and_switch_to_it("menu"))
             driver.execute_script("inicio()")
@@ -207,7 +232,7 @@ async def crear_descargar(ruta_principal, anio, mes):
             except Exception: pass
             archivo = esperar_descarga(carpeta_descarga)
             mover_archivo(archivo, ejec_path, "Depositos_Colocaciones_Ejecucion.xlsx")
-            print("✓ Grupo Ejecución completado")
+            print("PROGRESS::Grupo Ejecución completado.", flush=True)
         except Exception:
             logs_dir = os.path.join(ruta_principal, 'logs')
             ts = int(time.time())
@@ -225,7 +250,7 @@ async def crear_descargar(ruta_principal, anio, mes):
             shutil.rmtree(profile_dir, ignore_errors=True)
         os.makedirs(profile_dir, exist_ok=True)
         os.makedirs(carpeta_descarga, exist_ok=True)
-        options = webdriver.ChromeOptions()
+        options = Options()
         options.add_experimental_option("prefs", {
             "download.default_directory": carpeta_descarga,
             "download.prompt_for_download": False,
@@ -274,10 +299,10 @@ async def crear_descargar(ruta_principal, anio, mes):
             wait.until(EC.frame_to_be_available_and_switch_to_it("right"))
             driver.execute_script("openSelectedMenu('CONSULTAS_ADMIN')")
 
-            print("Descargando reportes de cierre...")
+            print("PROGRESS::Cierre: descargando reportes de cierre...", flush=True)
             descargar("000", mes,  "Estado_de_Cierre_del_Periodo_Ejecucion.xlsx")
             descargar("002", "16", "Estado_de_Cierre_del_Periodo_Formulacion.xlsx")
-            print("✓ Grupo Cierre completado")
+            print("PROGRESS::Grupo Cierre completado.", flush=True)
         except Exception:
             logs_dir = os.path.join(ruta_principal, 'logs')
             ts = int(time.time())
@@ -295,7 +320,7 @@ async def crear_descargar(ruta_principal, anio, mes):
             shutil.rmtree(profile_dir, ignore_errors=True)
         os.makedirs(profile_dir, exist_ok=True)
         os.makedirs(carpeta_descarga, exist_ok=True)
-        options = webdriver.ChromeOptions()
+        options = Options()
         options.add_experimental_option("prefs", {
             "download.default_directory": carpeta_descarga,
             "download.prompt_for_download": False,
@@ -342,16 +367,16 @@ async def crear_descargar(ruta_principal, anio, mes):
             driver.execute_script("openSelectedMenu('FORMULACION')")
             time.sleep(0.5)
 
-            print("Descargando reportes financieros...")
+            print("PROGRESS::Formulación: descargando reportes financieros...", flush=True)
             flujo("form_finan_form_balan_gen",   "Estado_de_Situacion_Financiera_Formulacion.xlsx")
             flujo("form_finan_form_est_gan_per", "Estado_de_Resultados_Integrales_Formulacion.xlsx")
 
-            print("Descargando reportes presupuestarios...")
+            print("PROGRESS::Formulación: descargando reportes presupuestarios...", flush=True)
             flujo("form_pres_form_pres_ing_egr", "Presu_Ingresos_Egresos_Formulacion.xlsx")
             flujo("form_pres_form_flujo_caja",   "Flujo_de_Caja_Formulacion.xlsx")
             flujo("form_pres_form_gas_capital",  "Gastos_Capital_Formulacion_Presupuesto.xlsx", {"TIPOGASTOCAPITAL": "1"})
             flujo("form_pres_form_gas_capital",  "Gastos_Capital_Formulacion_Flujo_Caja.xlsx",  {"TIPOGASTOCAPITAL": "2"})
-            print("✓ Grupo Formulación completado")
+            print("PROGRESS::Grupo Formulación completado.", flush=True)
         except Exception:
             logs_dir = os.path.join(ruta_principal, 'logs')
             ts = int(time.time())
@@ -452,11 +477,16 @@ async def crear_descargar(ruta_principal, anio, mes):
         logger.warning('No se pudieron limpiar las carpetas temporales al finalizar')
 
     if failures:
-        print('\n✗ Algunos grupos fallaron. Revisa los logs en:')
-        print(f'  {os.path.join(ruta_principal, "logs")}')
+        print("ERROR::Algunos grupos de descarga fallaron.", flush=True)
+        print(f"ERROR::Revisa los logs en: {os.path.join(ruta_principal, 'logs')}", flush=True)
+
         for name, tb in failures.items():
-            print(f'  - {name}')
+            print(f"ERROR::{name} falló.", flush=True)
+            print(tb, flush=True)
+
+        return False
+
     else:
-        print("\n" + "="*60)
-        print("✓ PROCESO COMPLETADO EXITOSAMENTE")
-        print("="*60)
+        print("PROGRESS::Proceso de descarga completado exitosamente.", flush=True)
+        print("DEBUG::Crear_Descargar_0 finalizó con True", flush=True)
+        return True

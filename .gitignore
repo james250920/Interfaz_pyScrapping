@@ -5,8 +5,9 @@ env/
 ENV/
 build/
 dist/
-Bot_Procesos.spec
-Bot_Procesos_Carpeta.spec
+SISTEMA_EXTRACCION_DEBUG.spec
+SISTEMA_EXTRACCIÓN.spec
+
 
 
 # Archivos temporales de Python (Caché)

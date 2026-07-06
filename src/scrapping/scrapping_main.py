@@ -40,51 +40,30 @@ import subprocess
 # ============================================================
 # FUNCIONES EXISTENTES
 # ============================================================
-def cerrar_todos_los_python():
+def cerrar_todos_los_excel():
     try:
-        print("[Final] Validando cierre previo antes de matar procesos Python...", flush=True)
+        print("[Final] Cerrando procesos Excel restantes...", flush=True)
 
-        # Fuerza liberación de objetos pendientes en memoria.
         gc.collect()
-
-        # Fuerza escritura de buffers estándar.
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-
-        try:
-            sys.stderr.flush()
-        except Exception:
-            pass
-
-        time.sleep(2)
-
-        print("[Final] Cerrando todos los procesos Python...", flush=True)
+        time.sleep(1)
 
         if os.name == "nt":
-            # Windows
             subprocess.Popen(
                 [
                     "cmd",
                     "/c",
-                    "taskkill /F /IM python.exe /IM pythonw.exe /IM py.exe"
+                    "taskkill /F /IM EXCEL.EXE /T"
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-        else:
-            # Linux / macOS
-            subprocess.Popen(
-                "pkill -f python",
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+
+            time.sleep(2)
 
     except Exception as e:
-        print(f"[Final] Error al cerrar procesos Python: {e}", flush=True)
+        print(f"[Final] Error al cerrar procesos Excel: {e}", flush=True)
+
 
 def formato_name_plantillas(ruta_principal, mes):
     ruta_base = Path(ruta_principal).expanduser().resolve()
@@ -255,15 +234,35 @@ async def _ejecutar_crear_descargar_async(ruta_principal, anio, mes):
     Unico punto async permitido.
     """
 
-    resultado = Crear_Descargar_0.crear_descargar(ruta_principal, anio, mes)
+    print("PROGRESS::Entrando al módulo de descarga...", flush=True)
+    print(f"DEBUG::ruta_principal={ruta_principal}", flush=True)
+    print(f"DEBUG::anio={anio}", flush=True)
+    print(f"DEBUG::mes={mes}", flush=True)
 
-    if inspect.isawaitable(resultado):
-        resultado = await resultado
+    try:
+        resultado = Crear_Descargar_0.crear_descargar(
+            ruta_principal,
+            anio,
+            mes,
+        )
 
-    if resultado is False:
-        raise RuntimeError("[Crear_Descargar_0.crear_descargar] finalizo con resultado False")
+        if inspect.isawaitable(resultado):
+            print("PROGRESS::Ejecutando descarga asincrónica...", flush=True)
+            resultado = await resultado
 
-    return resultado
+        print(f"DEBUG::Resultado Crear_Descargar_0={resultado}", flush=True)
+
+        if resultado is False:
+            raise RuntimeError(
+                "[Crear_Descargar_0.crear_descargar] finalizó con resultado False"
+            )
+
+        return resultado
+
+    except Exception as e:
+        print(f"ERROR::Error en Crear_Descargar_0.crear_descargar: {e}", flush=True)
+        raise
+
 
 
 def ejecutar_crear_descargar_con_tiempo(ruta_principal, anio, mes):
@@ -283,6 +282,9 @@ def ejecutar_crear_descargar_con_tiempo(ruta_principal, anio, mes):
 
     duracion = time.perf_counter() - inicio
     print(f"[{nombre}] finalizado en {duracion:.2f} segundos.", flush=True)
+
+    if resultado is False:
+        raise RuntimeError(f"[{nombre}] finalizó con resultado False")
 
     return resultado
 
@@ -492,6 +494,7 @@ def scrapping_main(
     on_progreso=None,
     check_cancel=None,
 ):
+    cerrar_todos_los_excel()
     ruta_base = Path(ruta_principal).expanduser().resolve()
 
     def reportar(msg):
@@ -533,11 +536,11 @@ def scrapping_main(
             if "Proceso cancelado" in str(e):
                 reportar("Proceso cancelado de forma segura.")
                 print(f"ERROR::{e}", flush=True)
-                return
+                return False
 
             reportar(f"Proceso detenido por error: {e}")
             print(f"ERROR::{e}", flush=True)
-            return
+            return False
 
         _verificar_cancelacion(check_cancel)
 
@@ -554,10 +557,11 @@ def scrapping_main(
         print("DONE::Proceso finalizado correctamente", flush=True)
 
         time.sleep(1)
-        cerrar_todos_los_python()
-        return
+        cerrar_todos_los_excel()
+        return True
 
+    
     except Exception as e:
-        reportar(f"Proceso detenido por error: {e}")
-        print(f"ERROR::{e}", flush=True)
-        return
+            reportar(f"Proceso detenido por error: {e}")
+            print(f"ERROR::{e}", flush=True)
+            return False

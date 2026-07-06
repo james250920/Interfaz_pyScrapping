@@ -875,52 +875,41 @@ class MainWindow(QMainWindow):
         self.barra_progreso.setRange(0, 1)
         self.barra_progreso.setValue(1)
 
-        # Diferir el diálogo al siguiente ciclo del event loop.
-        # Mostrarlo directamente dentro del signal handler de
-        # readyReadStandardOutput impide que Qt lo pinte.
         QTimer.singleShot(0, self._mostrar_dialogo_exito)
 
     def _mostrar_dialogo_exito(self):
-        """Muestra el popup de éxito y cierra la app al aceptar."""
         show_success(
             self,
             "Completado",
             "El proceso de extracción finalizó correctamente con todos los excels procesados.",
         )
 
-        # Al aceptar el diálogo, matar el proceso hijo si sigue vivo y cerrar la app
         self._terminar_y_cerrar()
 
     def _terminar_y_cerrar(self):
-        """Mata el proceso hijo si sigue corriendo y cierra la aplicación."""
+        """Cierra el proceso hijo si sigue corriendo y luego cierra la aplicación."""
         if self._process is not None:
             try:
                 self._process.finished.disconnect(self._on_process_finished)
             except Exception:
                 pass
+
             try:
-                self._process.kill()
-                self._process.waitForFinished(3000)
+                if self._process.state() != QProcess.NotRunning:
+                    self._process.kill()
+                    self._process.waitForFinished(3000)
             except Exception:
                 pass
+
             try:
                 self._process.deleteLater()
             except Exception:
                 pass
+
             self._process = None
 
-        try:
-            # Forzar el cierre de todos los procesos python.exe en Windows (limpieza agresiva)
-            import os
-            # Opcionalmente, matar por PID del proceso actual y sus hijos
-            pid_actual = os.getpid()
-            os.system(f"taskkill /F /PID {pid_actual} /T >nul 2>&1")
-            # Y para asegurar, matar otros python (si el usuario lo requirió específicamente)
-            os.system("taskkill /F /IM python.exe /T >nul 2>&1")
-        except Exception:
-            pass
-
         from PySide6.QtWidgets import QApplication
+
         app = QApplication.instance()
         if app is not None:
             app.quit()
