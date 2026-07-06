@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QFrame,
     QSizePolicy,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
 from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor, QPainter
@@ -75,6 +76,49 @@ class MainWindow(QMainWindow):
     # ══════════════════════════════════════════════════════════════
     # CONSTRUCCIÓN DE LA UI
     # ══════════════════════════════════════════════════════════════
+    def _confirmar_cierre_excel(self) -> bool:
+        """
+        Muestra un diálogo de advertencia antes de iniciar la extracción,
+        ya que el proceso cerrará todos los archivos Excel abiertos.
+        Devuelve True si el usuario confirma continuar, False si cancela.
+        """
+        caja = QMessageBox(self)
+        caja.setWindowTitle("Advertencia")
+        caja.setIcon(QMessageBox.Warning)
+        caja.setText("Se cerrarán todos los archivos Excel abiertos")
+        caja.setInformativeText(
+            "Antes de continuar, guarda y cierra cualquier archivo Excel "
+            "que tengas abierto. El proceso de extracción cerrará todas las "
+            "instancias de Excel en ejecución.\n\n"
+            "¿Deseas continuar con la extracción?"
+        )
+        caja.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        caja.setDefaultButton(QMessageBox.No)
+
+        caja.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {BLANCO};
+            }}
+            QMessageBox QLabel {{
+                color: {TEXTO};
+                font-family: {FONT_FAMILY};
+                font-size: 13px;
+            }}
+            QPushButton {{
+                background-color: {ROJO};
+                color: {BLANCO};
+                border-radius: 8px;
+                padding: 6px 18px;
+                font-family: {FONT_FAMILY};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {ROJO_HOVER};
+            }}
+        """)
+
+        respuesta = caja.exec()
+        return respuesta == QMessageBox.Yes
 
     def init_ui(self):
         self.main_container = QWidget(self)
@@ -719,6 +763,8 @@ class MainWindow(QMainWindow):
                 "Advertencia",
                 "Por favor selecciona un año y un mes válidos.",
             )
+            return
+        if not self._confirmar_cierre_excel():
             return
 
         if self._process is not None:
