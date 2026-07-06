@@ -33,12 +33,58 @@ import re
 import inspect
 from pathlib import Path
 import asyncio
-
+import sys
+import gc
+import subprocess
 
 # ============================================================
 # FUNCIONES EXISTENTES
 # ============================================================
+def cerrar_todos_los_python():
+    try:
+        print("[Final] Validando cierre previo antes de matar procesos Python...", flush=True)
 
+        # Fuerza liberación de objetos pendientes en memoria.
+        gc.collect()
+
+        # Fuerza escritura de buffers estándar.
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+        time.sleep(2)
+
+        print("[Final] Cerrando todos los procesos Python...", flush=True)
+
+        if os.name == "nt":
+            # Windows
+            subprocess.Popen(
+                [
+                    "cmd",
+                    "/c",
+                    "taskkill /F /IM python.exe /IM pythonw.exe /IM py.exe"
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        else:
+            # Linux / macOS
+            subprocess.Popen(
+                "pkill -f python",
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+    except Exception as e:
+        print(f"[Final] Error al cerrar procesos Python: {e}", flush=True)
 
 def formato_name_plantillas(ruta_principal, mes):
     ruta_base = Path(ruta_principal).expanduser().resolve()
@@ -508,7 +554,7 @@ def scrapping_main(
         print("DONE::Proceso finalizado correctamente", flush=True)
 
         time.sleep(1)
-
+        cerrar_todos_los_python()
         return
 
     except Exception as e:
