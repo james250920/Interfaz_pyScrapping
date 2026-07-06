@@ -194,42 +194,46 @@ def cierre_periodo(ruta_principal):
 
         try:
             rango_destino_ejec = com_call(lambda: ws_destino_ejec.Range("B1:M1000"))
-            com_call(lambda: rango_destino_ejec.ClearContents())
+            com_call(lambda: rango_destino_ejec.Clear())
 
             rango_destino_marco = com_call(lambda: ws_destino_marco.Range("B1:M1000"))
-            com_call(lambda: rango_destino_marco.ClearContents())
+            com_call(lambda: rango_destino_marco.Clear())
         finally:
             rango_destino_ejec = None
             rango_destino_marco = None
             gc.collect()
 
-        def _copiar_valores(ws_origen, ws_destino, rango="B1:M1000"):
+
+        def _copiar_pegar(ws_origen, ws_destino, rango="B1:M1000"):
             rango_origen = None
             rango_destino = None
-            valores = None
 
             try:
                 rango_origen = com_call(lambda: ws_origen.Range(rango))
-                valores = com_call(lambda: rango_origen.Value)
-
                 rango_destino = com_call(lambda: ws_destino.Range(rango))
 
-                def _asignar():
-                    rango_destino.Value = valores
+                def _copiar():
+                    rango_origen.Copy(Destination=rango_destino)
 
-                com_call(_asignar)
+                com_call(_copiar)
+
+                try:
+                    com_call(lambda: setattr(excel, "CutCopyMode", False))
+                except Exception:
+                    pass
 
             finally:
-                valores = None
                 rango_origen = None
                 rango_destino = None
                 gc.collect()
 
+
         logger.info("Copiando Estado Cierre Ejec...")
-        _copiar_valores(ws_origen_ejec, ws_destino_ejec)
+        _copiar_pegar(ws_origen_ejec, ws_destino_ejec)
 
         logger.info("Copiando Estado Cierre Marco...")
-        _copiar_valores(ws_origen_marco, ws_destino_marco)
+        _copiar_pegar(ws_origen_marco, ws_destino_marco)
+
 
         logger.info("Guardando copia temporal del libro destino...")
         com_call(lambda: wb_destino.Save())

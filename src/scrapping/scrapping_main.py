@@ -176,7 +176,7 @@ def copiarPlantillas(ruta_principal):
     carpeta_origen = Path(
         os.environ.get(
             "RUTA_PLANTILLAS",
-            r"C:\Users\james\OneDrive\Escritorio\plantilla",
+            r"Z:\Data_extraction\Plantillas",
         )
     ).expanduser().resolve()
 
