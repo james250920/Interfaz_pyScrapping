@@ -6,7 +6,6 @@ import traceback
 import time
 import gc
 import subprocess
-
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
@@ -143,6 +142,7 @@ def ejecutar_scrapping_worker():
             sys.exit(1)
 
         print("DONE::Proceso finalizado correctamente", flush=True)
+
         sys.exit(0)
 
     except Exception as e:

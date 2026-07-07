@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QFrame,
     QSizePolicy,
+    QMessageBox
 )
 from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
 from PySide6.QtGui import QIcon, QMouseEvent, QPixmap, QColor, QPainter
@@ -75,7 +76,88 @@ class MainWindow(QMainWindow):
     # ══════════════════════════════════════════════════════════════
     # CONSTRUCCIÓN DE LA UI
     # ══════════════════════════════════════════════════════════════
+    def _mostrar_dialogo_exito(self):
+        """
+        Muestra el diálogo de 'Proceso terminado' con un único botón
+        'Aceptar'. Al pulsarlo (o cerrar el diálogo de cualquier forma),
+        se cierra la aplicación.
+        """
+        caja = QMessageBox(self)
+        caja.setWindowTitle("Completado")
+        caja.setIcon(QMessageBox.Information)
+        caja.setText("Proceso terminado")
+        caja.setInformativeText(
+            "El proceso de extracción finalizó correctamente con todos "
+            "los excels procesados."
+        )
 
+        boton_aceptar = caja.addButton("Aceptar", QMessageBox.AcceptRole)
+        caja.setDefaultButton(boton_aceptar)
+
+        caja.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {BLANCO};
+            }}
+            QMessageBox QLabel {{
+                color: {TEXTO};
+                font-family: {FONT_FAMILY};
+                font-size: 13px;
+            }}
+            QPushButton {{
+                background-color: {ROJO};
+                color: {BLANCO};
+                border-radius: 8px;
+                padding: 6px 22px;
+                font-family: {FONT_FAMILY};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {ROJO_HOVER};
+            }}
+        """)
+
+        caja.exec()
+
+        self._terminar_y_cerrar()
+
+    def _confirmar_cierre_excel(self) -> bool:
+        caja = QMessageBox(self)
+        caja.setWindowTitle("Advertencia")
+        caja.setIcon(QMessageBox.Warning)
+        caja.setText("Se cerrarán todos los archivos Excel abiertos")
+        caja.setInformativeText(
+            "Antes de continuar, guarda y cierra cualquier archivo Excel "
+            "que tengas abierto. El proceso de extracción cerrará todas las "
+            "instancias de Excel en ejecución.\n\n"
+            "¿Deseas continuar con la extracción?"
+        )
+        caja.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        caja.setDefaultButton(QMessageBox.No)
+
+        caja.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {BLANCO};
+            }}
+            QMessageBox QLabel {{
+                color: {TEXTO};
+                font-family: {FONT_FAMILY};
+                font-size: 13px;
+            }}
+            QPushButton {{
+                background-color: {ROJO};
+                color: {BLANCO};
+                border-radius: 8px;
+                padding: 6px 18px;
+                font-family: {FONT_FAMILY};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {ROJO_HOVER};
+            }}
+        """)
+
+        respuesta = caja.exec()
+        return respuesta == QMessageBox.Yes
     def init_ui(self):
         self.main_container = QWidget(self)
         self.main_container.setObjectName("MainContainer")
@@ -720,7 +802,10 @@ class MainWindow(QMainWindow):
                 "Por favor selecciona un año y un mes válidos.",
             )
             return
-
+        
+        if not self._confirmar_cierre_excel():
+                return
+        
         if self._process is not None:
             show_warning(
                 self,
@@ -869,22 +954,10 @@ class MainWindow(QMainWindow):
 
         self._proceso_marco_done = True
         self._ultimo_error_proceso = None
-        self._success_mostrado = True
 
         self.lbl_progreso.setText("Proceso finalizado correctamente.")
         self.barra_progreso.setRange(0, 1)
         self.barra_progreso.setValue(1)
-
-        QTimer.singleShot(0, self._mostrar_dialogo_exito)
-
-    def _mostrar_dialogo_exito(self):
-        show_success(
-            self,
-            "Completado",
-            "El proceso de extracción finalizó correctamente con todos los excels procesados.",
-        )
-
-        self._terminar_y_cerrar()
 
     def _terminar_y_cerrar(self):
         """Cierra el proceso hijo si sigue corriendo y luego cierra la aplicación."""
@@ -941,13 +1014,7 @@ class MainWindow(QMainWindow):
 
         if exit_code == 0 or self._proceso_marco_done:
             self._success_mostrado = True
-
-            show_success(
-                self,
-                "Completado",
-                "El proceso de extracción finalizó correctamente con todos los excels procesados.",
-            )
-
+            self._mostrar_dialogo_exito()
             self._terminar_y_cerrar()
         else:
             mensaje = self._ultimo_error_proceso or (
