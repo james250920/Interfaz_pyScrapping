@@ -155,11 +155,11 @@ def copiarPlantillas(ruta_principal):
     carpeta_origen = Path(
         os.environ.get(
             "RUTA_PLANTILLAS",
-            r"C:\Users\james\OneDrive\Escritorio\TEST",
+            r"Z:\Data_extraction\Plantillas",
             
         )
     ).expanduser().resolve()
-#r"Z:\Data_extraction\Plantillas",
+
     carpeta_destino = Path(ruta_principal).expanduser().resolve()
 
     if not carpeta_origen.exists():
