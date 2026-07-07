@@ -76,6 +76,51 @@ class MainWindow(QMainWindow):
     # ══════════════════════════════════════════════════════════════
     # CONSTRUCCIÓN DE LA UI
     # ══════════════════════════════════════════════════════════════
+    def _mostrar_dialogo_exito(self):
+        """
+        Muestra el diálogo de 'Proceso terminado' con un único botón
+        'Aceptar'. Al pulsarlo (o cerrar el diálogo de cualquier forma),
+        se cierra la aplicación.
+        """
+        caja = QMessageBox(self)
+        caja.setWindowTitle("Completado")
+        caja.setIcon(QMessageBox.Information)
+        caja.setText("Proceso terminado")
+        caja.setInformativeText(
+            "El proceso de extracción finalizó correctamente con todos "
+            "los excels procesados."
+        )
+
+        boton_aceptar = caja.addButton("Aceptar", QMessageBox.AcceptRole)
+        caja.setDefaultButton(boton_aceptar)
+
+        caja.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {BLANCO};
+            }}
+            QMessageBox QLabel {{
+                color: {TEXTO};
+                font-family: {FONT_FAMILY};
+                font-size: 13px;
+            }}
+            QPushButton {{
+                background-color: {ROJO};
+                color: {BLANCO};
+                border-radius: 8px;
+                padding: 6px 22px;
+                font-family: {FONT_FAMILY};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {ROJO_HOVER};
+            }}
+        """)
+
+        caja.exec()
+
+        self._terminar_y_cerrar()
+
+
     def _confirmar_cierre_excel(self) -> bool:
         """
         Muestra un diálogo de advertencia antes de iniciar la extracción,
