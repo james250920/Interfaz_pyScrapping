@@ -6,7 +6,6 @@ import traceback
 import time
 import gc
 import subprocess
-
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
@@ -143,6 +142,7 @@ def ejecutar_scrapping_worker():
             sys.exit(1)
 
         print("DONE::Proceso finalizado correctamente", flush=True)
+
         sys.exit(0)
 
     except Exception as e:
@@ -170,12 +170,11 @@ def main():
         return
 
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["PYTHONIOENCODING"] = "utf-8"
     os.environ["PYTHONUTF8"] = "1"
 
     QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor
     )
 
     app = QApplication(sys.argv)

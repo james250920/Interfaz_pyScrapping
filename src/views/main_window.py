@@ -915,22 +915,10 @@ class MainWindow(QMainWindow):
 
         self._proceso_marco_done = True
         self._ultimo_error_proceso = None
-        self._success_mostrado = True
 
         self.lbl_progreso.setText("Proceso finalizado correctamente.")
         self.barra_progreso.setRange(0, 1)
         self.barra_progreso.setValue(1)
-
-        QTimer.singleShot(0, self._mostrar_dialogo_exito)
-
-    def _mostrar_dialogo_exito(self):
-        show_success(
-            self,
-            "Completado",
-            "El proceso de extracción finalizó correctamente con todos los excels procesados.",
-        )
-
-        self._terminar_y_cerrar()
 
     def _terminar_y_cerrar(self):
         """Cierra el proceso hijo si sigue corriendo y luego cierra la aplicación."""
@@ -987,13 +975,7 @@ class MainWindow(QMainWindow):
 
         if exit_code == 0 or self._proceso_marco_done:
             self._success_mostrado = True
-
-            show_success(
-                self,
-                "Completado",
-                "El proceso de extracción finalizó correctamente con todos los excels procesados.",
-            )
-
+            self._mostrar_dialogo_exito()
             self._terminar_y_cerrar()
         else:
             mensaje = self._ultimo_error_proceso or (

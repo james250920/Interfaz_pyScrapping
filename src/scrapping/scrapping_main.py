@@ -156,6 +156,7 @@ def copiarPlantillas(ruta_principal):
         os.environ.get(
             "RUTA_PLANTILLAS",
             r"Z:\Data_extraction\Plantillas",
+            
         )
     ).expanduser().resolve()
 
